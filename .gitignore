@@ -23,6 +23,7 @@ desktop.ini
 
 # Claude Code
 .claude/
+CLAUDE.md
 
 # Project internal docs (not for public repo)
 document/
@@ -31,6 +32,7 @@ document/
 *.tmp
 *.bak
 *.log
+tsconfig.tsbuildinfo
 
 # Tauri generated
 src-tauri/gen/

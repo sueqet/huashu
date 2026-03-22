@@ -28,6 +28,8 @@ export interface ApiProvider {
   name: string;
   /** API 端点 URL */
   apiUrl: string;
+  /** API 密钥 */
+  apiKey: string;
   /** 该厂商支持的模型名称列表 */
   models: string[];
   /** 默认使用的模型 */

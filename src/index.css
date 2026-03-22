@@ -43,3 +43,12 @@
     font-family: "Microsoft YaHei", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
   }
 }
+
+@keyframes batch-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(147, 51, 234, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 12px 4px rgba(147, 51, 234, 0.25);
+  }
+}

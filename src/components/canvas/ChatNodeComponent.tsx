@@ -4,18 +4,30 @@ import type { NodeProps } from "@xyflow/react";
 import { ChevronDown, ChevronRight, Pin, Star } from "lucide-react";
 import type { ChatNodeData } from "@/lib/tree-layout";
 
+/** Dispatch a custom event to toggle collapse for a node on the canvas */
+function dispatchToggleCollapse(nodeId: string) {
+  window.dispatchEvent(
+    new CustomEvent("toggle-collapse", { detail: { nodeId } })
+  );
+}
+
 /**
  * 自定义 React Flow 节点组件
  * - 用户消息：蓝色边框，前 50 字符预览
  * - AI 回复：绿色边框，前 80 字符预览
  * - 不完整节点：橙色边框
  */
+/** Circled number characters for batch selection overlay */
+const CIRCLED_NUMBERS = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩",
+  "⑪", "⑫", "⑬", "⑭", "⑮", "⑯", "⑰", "⑱", "⑲", "⑳"];
+
 export const ChatNodeComponent = memo(function ChatNodeComponent({
   data,
 }: NodeProps) {
   const nodeData = data as unknown as ChatNodeData;
-  const { chatNode, isCollapsed, hasChildren } = nodeData;
+  const { chatNode, isCollapsed, hasChildren, batchIndex } = nodeData;
   const [showPreview, setShowPreview] = useState(false);
+  const isBatchSelected = batchIndex != null;
 
   const isUser = chatNode.role === "user";
   const previewLength = isUser ? 50 : 80;
@@ -38,10 +50,20 @@ export const ChatNodeComponent = memo(function ChatNodeComponent({
 
   return (
     <div
-      className={`relative rounded-lg border-2 ${borderColor} ${bgColor} shadow-sm w-[240px] select-none`}
+      className={`relative rounded-lg border-2 ${borderColor} ${bgColor} shadow-sm w-[240px] select-none ${
+        isBatchSelected ? "ring-2 ring-purple-500 ring-offset-1 animate-[batch-pulse_2s_ease-in-out_infinite]" : ""
+      }`}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={() => setShowPreview(false)}
     >
+      {/* 批量选择序号标记 */}
+      {isBatchSelected && (
+        <div className="absolute -top-3 -right-3 z-10 flex items-center justify-center w-7 h-7 rounded-full bg-purple-600 text-white text-sm font-bold shadow-md">
+          {batchIndex < CIRCLED_NUMBERS.length
+            ? CIRCLED_NUMBERS[batchIndex]
+            : batchIndex + 1}
+        </div>
+      )}
       {/* 顶部连接点（接收来自父节点的边） */}
       <Handle
         type="target"
@@ -83,7 +105,14 @@ export const ChatNodeComponent = memo(function ChatNodeComponent({
 
         {/* 折叠/展开按钮 */}
         {hasChildren && (
-          <div className="flex justify-center mt-1">
+          <div
+            className="flex justify-center mt-1 cursor-pointer rounded hover:bg-background/50 transition-colors"
+            onClick={(e) => {
+              e.stopPropagation();
+              dispatchToggleCollapse(chatNode.id);
+            }}
+            title={isCollapsed ? "展开子节点" : "折叠子节点"}
+          >
             {isCollapsed ? (
               <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
             ) : (

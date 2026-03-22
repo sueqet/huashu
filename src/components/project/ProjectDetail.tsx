@@ -14,6 +14,8 @@ import {
   Download,
 } from "lucide-react";
 import { exportService } from "@/services/export-service";
+import { save } from "@tauri-apps/plugin-dialog";
+import { writeFile } from "@tauri-apps/plugin-fs";
 
 interface ProjectDetailProps {
   projectId: string;
@@ -55,23 +57,31 @@ export function ProjectDetail({
     );
   }
 
+  const [exportError, setExportError] = useState<string | null>(null);
+
   const handleExportProject = async () => {
     setExporting(true);
+    setExportError(null);
     try {
+      // 使用 Tauri 对话框选择保存路径
+      const savePath = await save({
+        defaultPath: `${project?.name || "project"}.zip`,
+        filters: [{ name: "ZIP 文件", extensions: ["zip"] }],
+      });
+      if (!savePath) {
+        // 用户取消了保存
+        setExporting(false);
+        return;
+      }
+
       const zipData = await exportService.exportProject(projectId);
-      // 通过 Blob 下载
-      const blob = new Blob([new Uint8Array(zipData)], { type: "application/zip" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${project?.name || "project"}.zip`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      // 使用 Tauri FS 写入文件到用户选择的路径
+      await writeFile(savePath, new Uint8Array(zipData));
+      setExportError(null);
     } catch (err) {
       console.error("导出项目失败:", err);
-      alert("导出项目失败，请稍后重试。");
+      const msg = err instanceof Error ? err.message : String(err);
+      setExportError(`导出失败：${msg}`);
     } finally {
       setExporting(false);
     }
@@ -151,7 +161,10 @@ export function ProjectDetail({
           </h2>
         )}
 
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          {exportError && (
+            <span className="text-xs text-destructive">{exportError}</span>
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -215,8 +228,24 @@ export function ProjectDetail({
 
       {/* 知识库（RAG） */}
       {project.ragEnabled && (
-        <div className="mb-4 border rounded-lg">
-          <KnowledgeBasePanel projectId={projectId} />
+        <div className="mb-4">
+          <div className="border rounded-lg">
+            <KnowledgeBasePanel projectId={projectId} />
+          </div>
+          <div className="mt-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-destructive border-destructive/30 hover:bg-destructive/10"
+              onClick={() => {
+                if (confirm("确定要关闭 RAG 知识库吗？已有的知识库数据不会被删除，再次启用后可继续使用。")) {
+                  updateProject(projectId, { ragEnabled: false });
+                }
+              }}
+            >
+              关闭 RAG 知识库
+            </Button>
+          </div>
         </div>
       )}
 

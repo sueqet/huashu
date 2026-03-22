@@ -85,6 +85,7 @@ export interface ChatNodeData {
   chatNode: ChatNode;
   isCollapsed: boolean;
   hasChildren: boolean;
+  batchIndex?: number | null;
   [key: string]: unknown;
 }
 

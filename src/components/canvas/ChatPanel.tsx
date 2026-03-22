@@ -20,6 +20,12 @@ import {
   RefreshCw,
   Loader2,
 } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 interface ChatPanelProps {
   conversation: Conversation;
@@ -132,7 +138,7 @@ export function ChatPanel({
             conversation.projectId,
             currentNode.content,
             activeProvider.apiUrl,
-            "", // API key placeholder
+            activeProvider.apiKey,
             activeProvider.embedding.model,
             5
           );
@@ -168,7 +174,7 @@ export function ChatPanel({
 
     await streamChatCompletion({
       apiUrl: activeProvider.apiUrl,
-      apiKey: "", // TODO: 从安全存储获取
+      apiKey: activeProvider.apiKey,
       model: activeModel,
       messages: context.messages,
       modelConfig: activeProvider.modelConfig,
@@ -316,10 +322,16 @@ export function ChatPanel({
       {(canGenerate || isGenerating || currentNode?.role === "assistant") && (
         <div className="px-4 py-2 border-t bg-muted/30 flex items-center gap-2">
           {isGenerating ? (
-            <Button size="sm" variant="destructive" onClick={handleStop}>
-              <Square className="h-3 w-3 mr-1" />
-              停止生成
-            </Button>
+            <>
+              <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <span>生成中...</span>
+              </div>
+              <Button size="sm" variant="outline" className="text-destructive border-destructive/30 hover:bg-destructive/10" onClick={handleStop}>
+                <Square className="h-3 w-3 mr-1" />
+                停止
+              </Button>
+            </>
           ) : (
             <>
               {canGenerate && (
@@ -494,30 +506,46 @@ function MessageBubble({
         )}
 
         <div className="ml-auto flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-          <button
-            className="p-0.5 rounded hover:bg-background/50"
-            onClick={onToggleStar}
-            title={node.isStarred ? "取消收藏" : "收藏"}
-          >
-            <Star
-              className={`h-3 w-3 ${
-                node.isStarred
-                  ? "text-yellow-500 fill-yellow-500"
-                  : "text-muted-foreground"
-              }`}
-            />
-          </button>
-          <button
-            className="p-0.5 rounded hover:bg-background/50"
-            onClick={onTogglePin}
-            title={node.isPinned ? "取消锁定" : "锁定"}
-          >
-            {node.isPinned ? (
-              <PinOff className="h-3 w-3 text-amber-500" />
-            ) : (
-              <Pin className="h-3 w-3 text-muted-foreground" />
-            )}
-          </button>
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  className="p-0.5 rounded hover:bg-background/50"
+                  onClick={onToggleStar}
+                >
+                  <Star
+                    className={`h-3 w-3 ${
+                      node.isStarred
+                        ? "text-yellow-500 fill-yellow-500"
+                        : "text-muted-foreground"
+                    }`}
+                  />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                <p>收藏：标记重要消息</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  className="p-0.5 rounded hover:bg-background/50"
+                  onClick={onTogglePin}
+                >
+                  {node.isPinned ? (
+                    <PinOff className="h-3 w-3 text-amber-500" />
+                  ) : (
+                    <Pin className="h-3 w-3 text-muted-foreground" />
+                  )}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                <p>锁定：上下文裁剪时保留此消息</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           {hasChildren && (
             <button
               className="p-0.5 rounded hover:bg-background/50"

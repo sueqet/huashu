@@ -10,7 +10,7 @@ import {
   ChevronDown,
   ChevronRight,
 } from "lucide-react";
-import type { ApiProvider, ModelConfig } from "@/types";
+import type { ApiProvider, ModelConfig, EmbeddingConfig } from "@/types";
 
 export function SettingsPage() {
   const {
@@ -105,7 +105,7 @@ function ProviderForm({ initial, onSave, onCancel }: ProviderFormProps) {
   const [apiUrl, setApiUrl] = useState(
     initial?.apiUrl || "https://api.openai.com/v1"
   );
-  const [apiKey, setApiKey] = useState("");
+  const [apiKey, setApiKey] = useState(initial?.apiKey || "");
   const [models, setModels] = useState(initial?.models?.join(", ") || "");
   const [defaultModel, setDefaultModel] = useState(
     initial?.defaultModel || ""
@@ -115,6 +115,14 @@ function ProviderForm({ initial, onSave, onCancel }: ProviderFormProps) {
   );
   const [showKey, setShowKey] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // Embedding 配置
+  const [embeddingModel, setEmbeddingModel] = useState(
+    initial?.embedding?.model || ""
+  );
+  const [embeddingDimension, setEmbeddingDimension] = useState(
+    initial?.embedding?.dimension || 1536
+  );
 
   const defaultConfig: ModelConfig = initial?.modelConfig || {
     temperature: 0.7,
@@ -134,12 +142,17 @@ function ProviderForm({ initial, onSave, onCancel }: ProviderFormProps) {
         .split(",")
         .map((m) => m.trim())
         .filter(Boolean);
+      const embedding: EmbeddingConfig | undefined = embeddingModel.trim()
+        ? { model: embeddingModel.trim(), dimension: embeddingDimension }
+        : undefined;
       await onSave({
         name: name.trim(),
         apiUrl: apiUrl.trim(),
+        apiKey,
         models: modelList,
         defaultModel: defaultModel || modelList[0] || "",
         maxContextTokens,
+        embedding,
         modelConfig,
       });
     } finally {
@@ -292,6 +305,40 @@ function ProviderForm({ initial, onSave, onCancel }: ProviderFormProps) {
         </div>
       </div>
 
+      {/* Embedding 配置 */}
+      <div className="space-y-2">
+        <label className="text-xs font-medium text-muted-foreground">
+          Embedding 配置（用于 RAG 知识库，可选）
+        </label>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs text-muted-foreground">
+              Embedding 模型名称
+            </label>
+            <input
+              type="text"
+              value={embeddingModel}
+              onChange={(e) => setEmbeddingModel(e.target.value)}
+              placeholder="text-embedding-3-small"
+              className="w-full mt-1 px-2 py-1 border rounded text-sm bg-background outline-none"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground">
+              Embedding 维度
+            </label>
+            <input
+              type="number"
+              value={embeddingDimension}
+              onChange={(e) => setEmbeddingDimension(Number(e.target.value))}
+              placeholder="1536"
+              min="1"
+              className="w-full mt-1 px-2 py-1 border rounded text-sm bg-background outline-none"
+            />
+          </div>
+        </div>
+      </div>
+
       <div className="flex gap-2 pt-2">
         <Button size="sm" onClick={handleSubmit} disabled={saving || !name.trim()}>
           {saving ? "保存中..." : "保存"}
@@ -379,6 +426,22 @@ function ProviderCard({
                   <span className="text-muted-foreground">上下文限制：</span>
                   <span>{provider.maxContextTokens.toLocaleString()} tokens</span>
                 </div>
+                <div>
+                  <span className="text-muted-foreground">API 密钥：</span>
+                  <span>
+                    {provider.apiKey
+                      ? `${provider.apiKey.slice(0, 3)}****${provider.apiKey.slice(-4)}`
+                      : "未设置"}
+                  </span>
+                </div>
+                {provider.embedding && (
+                  <div>
+                    <span className="text-muted-foreground">Embedding：</span>
+                    <span>
+                      {provider.embedding.model} ({provider.embedding.dimension}维)
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* 模型选择 */}

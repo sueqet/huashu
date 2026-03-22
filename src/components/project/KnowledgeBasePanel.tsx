@@ -85,7 +85,7 @@ export function KnowledgeBasePanel({ projectId }: KnowledgeBasePanelProps) {
           file.name,
           content,
           activeProvider.apiUrl,
-          activeProvider.embedding ? "" : "", // API key placeholder
+          activeProvider.apiKey,
           embeddingConfig.model,
           (stage) => setProcessing(`${file.name}: ${stage}`)
         );
