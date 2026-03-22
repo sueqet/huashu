@@ -62,7 +62,6 @@ pnpm tauri dev
 pnpm tauri build
 ```
 
-> Windows 用户也可以双击 `启动话树(开发模式).bat` 启动。
 
 ### 构建产物
 
