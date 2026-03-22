@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+src-tauri/target/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Env files
+.env
+.env.*
+
+# Claude Code
+.claude/
+
+# Project internal docs (not for public repo)
+document/
+
+# Temp files
+*.tmp
+*.bak
+*.log
+
+# Tauri generated
+src-tauri/gen/
+
+# VBS helper script
+create_shortcut.vbs

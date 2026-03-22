@@ -1,0 +1,19 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicegui-org/nicegui/main/nicegui/native/tauri_aarch64-apple-darwin/src-tauri/gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "默认权限集合",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "opener:default",
+    "fs:default",
+    "fs:allow-appdata-read-recursive",
+    "fs:allow-appdata-write-recursive",
+    "fs:allow-appdata-meta-recursive",
+    "fs:allow-rename",
+    "fs:allow-remove",
+    "fs:allow-exists",
+    "fs:allow-mkdir",
+    "store:default"
+  ]
+}

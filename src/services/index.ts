@@ -1,0 +1,23 @@
+export { fileService } from "./file-service";
+export { projectService } from "./project-service";
+export { conversationService } from "./conversation-service";
+export { configService } from "./config-service";
+export { migrateData, registerMigration, SCHEMA_VERSIONS } from "./migration-service";
+export { countTokens, countMessagesTokens } from "./token-service";
+export { buildContext } from "./context-service";
+export { streamChatCompletion } from "./ai-service";
+export { searchNodes } from "./search-service";
+export { exportService } from "./export-service";
+export { portableService } from "./portable-service";
+export { parseDocument, SUPPORTED_FILE_TYPES } from "./document-parser";
+export { splitText } from "./text-splitter";
+export { getEmbedding, getEmbeddings } from "./embedding-service";
+export { VectorStore } from "./vector-store";
+export {
+  getKnowledgeBase,
+  initKnowledgeBase,
+  addDocument,
+  removeDocument,
+  searchKnowledge,
+  checkEmbeddingCompatibility,
+} from "./rag-service";

@@ -1,0 +1,114 @@
+import { memo, useState, useCallback } from "react";
+import { Handle, Position } from "@xyflow/react";
+import type { NodeProps } from "@xyflow/react";
+import { ChevronDown, ChevronRight, Pin, Star } from "lucide-react";
+import type { ChatNodeData } from "@/lib/tree-layout";
+
+/**
+ * 自定义 React Flow 节点组件
+ * - 用户消息：蓝色边框，前 50 字符预览
+ * - AI 回复：绿色边框，前 80 字符预览
+ * - 不完整节点：橙色边框
+ */
+export const ChatNodeComponent = memo(function ChatNodeComponent({
+  data,
+}: NodeProps) {
+  const nodeData = data as unknown as ChatNodeData;
+  const { chatNode, isCollapsed, hasChildren } = nodeData;
+  const [showPreview, setShowPreview] = useState(false);
+
+  const isUser = chatNode.role === "user";
+  const previewLength = isUser ? 50 : 80;
+  const preview =
+    chatNode.content.length > previewLength
+      ? chatNode.content.slice(0, previewLength) + "..."
+      : chatNode.content;
+
+  // 边框颜色
+  let borderColor = isUser ? "border-blue-400" : "border-green-400";
+  if (chatNode.isPartial) borderColor = "border-orange-400";
+
+  // 背景色
+  const bgColor = isUser ? "bg-blue-50" : "bg-green-50";
+
+  const handleMouseEnter = useCallback(() => {
+    const timer = setTimeout(() => setShowPreview(true), 200);
+    return () => clearTimeout(timer);
+  }, []);
+
+  return (
+    <div
+      className={`relative rounded-lg border-2 ${borderColor} ${bgColor} shadow-sm w-[240px] select-none`}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={() => setShowPreview(false)}
+    >
+      {/* 顶部连接点（接收来自父节点的边） */}
+      <Handle
+        type="target"
+        position={Position.Top}
+        className="!bg-gray-400 !w-2 !h-2"
+      />
+
+      {/* 节点内容 */}
+      <div className="px-3 py-2">
+        {/* 角色标签 + 状态图标 */}
+        <div className="flex items-center gap-1.5 mb-1">
+          <span
+            className={`text-xs font-medium ${
+              isUser ? "text-blue-600" : "text-green-600"
+            }`}
+          >
+            {isUser ? "用户" : "AI"}
+          </span>
+          {chatNode.isPartial && (
+            <span className="text-xs text-orange-500">未完成</span>
+          )}
+          {chatNode.isPinned && (
+            <Pin className="h-3 w-3 text-amber-500" />
+          )}
+          {chatNode.isStarred && (
+            <Star className="h-3 w-3 text-yellow-500 fill-yellow-500" />
+          )}
+          {chatNode.modelName && (
+            <span className="ml-auto text-[10px] text-muted-foreground truncate max-w-[80px]">
+              {chatNode.modelName}
+            </span>
+          )}
+        </div>
+
+        {/* 消息预览 */}
+        <p className="text-xs text-foreground/80 leading-relaxed line-clamp-2">
+          {preview || "(空消息)"}
+        </p>
+
+        {/* 折叠/展开按钮 */}
+        {hasChildren && (
+          <div className="flex justify-center mt-1">
+            {isCollapsed ? (
+              <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+            ) : (
+              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* 底部连接点（连接到子节点） */}
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        className="!bg-gray-400 !w-2 !h-2"
+      />
+
+      {/* 悬停预览面板 */}
+      {showPreview && chatNode.content.length > previewLength && (
+        <div className="absolute z-50 top-full left-0 mt-2 w-[320px] max-h-[300px] overflow-y-auto rounded-lg border bg-popover p-3 shadow-lg">
+          <p className="text-xs whitespace-pre-wrap break-words">
+            {chatNode.content.slice(0, 500)}
+            {chatNode.content.length > 500 && "..."}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+});
