@@ -12,6 +12,21 @@ export interface RagSource {
   score: number;
 }
 
+/** 附件类型 */
+export type AttachmentType = "image" | "document";
+
+/** 消息附件 */
+export interface Attachment {
+  id: string;
+  type: AttachmentType;
+  filename: string;
+  mimeType: string;
+  /** base64 data URL (图片) 或解析后的文本 (文档) */
+  data: string;
+  /** 原始文件大小（字节） */
+  size: number;
+}
+
 /** 对话节点角色 */
 export type NodeRole = "user" | "assistant";
 
@@ -39,6 +54,8 @@ export interface ChatNode {
   isStarred: boolean;
   /** 使用的模型名称（AI 节点） */
   modelName?: string;
+  /** 附件列表（图片、文档） */
+  attachments?: Attachment[];
   /** RAG 检索来源（引用的知识库片段） */
   ragSources?: RagSource[];
   /** 创建时间 */

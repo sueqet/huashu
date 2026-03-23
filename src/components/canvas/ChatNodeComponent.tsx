@@ -1,7 +1,7 @@
 import { memo, useState, useCallback } from "react";
 import { Handle, Position } from "@xyflow/react";
 import type { NodeProps } from "@xyflow/react";
-import { ChevronDown, ChevronRight, Pin, Star } from "lucide-react";
+import { ChevronDown, ChevronRight, Pin, Star, Paperclip } from "lucide-react";
 import type { ChatNodeData } from "@/lib/tree-layout";
 
 /** Dispatch a custom event to toggle collapse for a node on the canvas */
@@ -90,6 +90,9 @@ export const ChatNodeComponent = memo(function ChatNodeComponent({
           )}
           {chatNode.isStarred && (
             <Star className="h-3 w-3 text-yellow-500 fill-yellow-500" />
+          )}
+          {chatNode.attachments && chatNode.attachments.length > 0 && (
+            <Paperclip className="h-3 w-3 text-muted-foreground" />
           )}
           {chatNode.modelName && (
             <span className="ml-auto text-[10px] text-muted-foreground truncate max-w-[80px]">

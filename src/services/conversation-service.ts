@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
-import type { Conversation, ChatNode } from "@/types";
+import type { Conversation, ChatNode, Attachment } from "@/types";
 import { fileService } from "./file-service";
 
 const CURRENT_SCHEMA_VERSION = 1;
@@ -137,10 +137,11 @@ export const conversationService = {
     conversationId: string,
     role: ChatNode["role"],
     content: string,
-    parentId: string | null
+    parentId: string | null,
+    attachments?: Attachment[]
   ): ChatNode {
     const now = Date.now();
-    return {
+    const node: ChatNode = {
       id: uuidv4(),
       conversationId,
       parentId,
@@ -154,5 +155,9 @@ export const conversationService = {
       createdAt: now,
       updatedAt: now,
     };
+    if (attachments && attachments.length > 0) {
+      node.attachments = attachments;
+    }
+    return node;
   },
 };

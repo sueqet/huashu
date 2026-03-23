@@ -53,16 +53,41 @@ export function countTokens(text: string, model: string): number {
   return Math.ceil(tokens);
 }
 
+/** OpenAI Vision 格式的内容部分 */
+type ContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+
+/** 估算单条消息 content 的 token 数 */
+function countContentTokens(
+  content: string | ContentPart[],
+  model: string
+): number {
+  if (typeof content === "string") {
+    return countTokens(content, model);
+  }
+  let total = 0;
+  for (const part of content) {
+    if (part.type === "text") {
+      total += countTokens(part.text, model);
+    } else {
+      // 图片 token 估算（OpenAI low-detail: 85, high-detail: 765）
+      total += 765;
+    }
+  }
+  return total;
+}
+
 /**
  * 计算消息数组的总 Token 数（包含角色标记的开销）
  */
 export function countMessagesTokens(
-  messages: Array<{ role: string; content: string }>,
+  messages: Array<{ role: string; content: string | ContentPart[] }>,
   model: string
 ): number {
   let total = 0;
   for (const msg of messages) {
-    total += countTokens(msg.content, model);
+    total += countContentTokens(msg.content, model);
     total += 4; // 每条消息的角色和格式开销
   }
   total += 2; // 对话起始/结束标记

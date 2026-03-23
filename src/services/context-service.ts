@@ -1,9 +1,53 @@
 import type { ChatNode } from "@/types";
 import { countTokens, countMessagesTokens } from "./token-service";
 
+/** OpenAI Vision 格式的内容部分 */
+export type ContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+
 export interface ContextMessage {
   role: "system" | "user" | "assistant";
-  content: string;
+  content: string | ContentPart[];
+}
+
+/** 将 ChatNode 转为 ContextMessage，处理附件 */
+function nodeToMessage(node: ChatNode): ContextMessage {
+  const attachments = node.attachments || [];
+  const images = attachments.filter((a) => a.type === "image");
+  const docs = attachments.filter((a) => a.type === "document");
+
+  // 如果没有附件，返回纯文本
+  if (images.length === 0 && docs.length === 0) {
+    return { role: node.role, content: node.content };
+  }
+
+  // 有图片附件：使用 content 数组格式
+  if (images.length > 0) {
+    const parts: ContentPart[] = [];
+    // 文本内容（包含文档附件的文本）
+    let textContent = node.content;
+    if (docs.length > 0) {
+      const docTexts = docs
+        .map((d) => `[附件: ${d.filename}]\n${d.data}`)
+        .join("\n\n");
+      textContent = textContent + "\n\n" + docTexts;
+    }
+    if (textContent) {
+      parts.push({ type: "text", text: textContent });
+    }
+    // 图片
+    for (const img of images) {
+      parts.push({ type: "image_url", image_url: { url: img.data } });
+    }
+    return { role: node.role, content: parts };
+  }
+
+  // 只有文档附件：拼接到文本中
+  const docTexts = docs
+    .map((d) => `[附件: ${d.filename}]\n${d.data}`)
+    .join("\n\n");
+  return { role: node.role, content: node.content + "\n\n" + docTexts };
 }
 
 interface BuildContextOptions {
@@ -108,10 +152,7 @@ export function buildContext(options: BuildContextOptions): ContextResult {
   const unpinnedMiddle = middleMessages.filter((n) => !n.isPinned);
 
   const fixedNodes = [...firstRound, ...pinnedMiddle, ...recentMessages];
-  const fixedMessages = fixedNodes.map((n) => ({
-    role: n.role as "user" | "assistant",
-    content: n.content,
-  }));
+  const fixedMessages = fixedNodes.map((n) => nodeToMessage(n));
   const fixedTokens = systemTokens + countMessagesTokens(fixedMessages, model);
 
   // 5. 从剩余空间中尽量多保留中间消息（从新到旧加入）
@@ -142,10 +183,7 @@ export function buildContext(options: BuildContextOptions): ContextResult {
   for (const node of allNodes) {
     if (seen.has(node.id)) continue;
     seen.add(node.id);
-    messages.push({
-      role: node.role as "user" | "assistant",
-      content: node.content,
-    });
+    messages.push(nodeToMessage(node));
   }
 
   const totalTokens = countMessagesTokens(messages, model);

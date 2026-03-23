@@ -6,6 +6,7 @@ import { useConfigStore } from "@/stores/config-store";
 import { useProjectStore } from "@/stores/project-store";
 import { conversationService, buildContext, streamChatCompletion } from "@/services";
 import { searchKnowledge } from "@/services/rag-service";
+import { useAttachments } from "@/hooks/useAttachments";
 import { Button } from "@/components/ui/button";
 import {
   X,
@@ -19,6 +20,9 @@ import {
   Square,
   RefreshCw,
   Loader2,
+  ImageIcon,
+  FileText,
+  Paperclip,
 } from "lucide-react";
 import {
   Tooltip,
@@ -71,6 +75,15 @@ export function ChatPanel({
   const abortControllerRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  const {
+    attachments,
+    handlePaste,
+    pickImages,
+    pickDocuments,
+    removeAttachment,
+    clearAttachments,
+  } = useAttachments();
+
   const messages = useMemo(
     () => traceMessages(conversation.nodes, selectedNodeId),
     [conversation.nodes, selectedNodeId]
@@ -89,26 +102,18 @@ export function ChatPanel({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streamingContent]);
 
-  // 发送消息
-  const handleSend = useCallback(async () => {
-    if (!inputText.trim()) return;
-    const node = conversationService.createNode(
-      conversation.id,
-      "user",
-      inputText.trim(),
-      selectedNodeId
-    );
-    await addNodeAndSave(node);
-    setInputText("");
-    onSelectNode(node.id);
-  }, [inputText, conversation.id, selectedNodeId, addNodeAndSave, onSelectNode]);
-
-  // AI 生成回复
-  const handleGenerate = useCallback(async () => {
+  // AI 生成回复（接受可选的 overrideNodeId）
+  const handleGenerate = useCallback(async (overrideNodeId?: string) => {
     if (!activeProvider || !activeModel) {
       setError("请先在设置中配置 API");
       return;
     }
+
+    const targetNodeId = overrideNodeId || selectedNodeId;
+
+    // 从 store 获取最新的 conversation（避免闭包中的旧值）
+    const latestConv = useConversationStore.getState().conversation;
+    if (!latestConv) return;
 
     setIsGenerating(true);
     setStreamingContent("");
@@ -116,10 +121,10 @@ export function ChatPanel({
 
     // 创建 AI 回复节点（初始为空，标记为 partial）
     const aiNode = conversationService.createNode(
-      conversation.id,
+      latestConv.id,
       "assistant",
       "",
-      selectedNodeId
+      targetNodeId
     );
     aiNode.isPartial = true;
     aiNode.isUserEdited = false;
@@ -131,11 +136,12 @@ export function ChatPanel({
     let ragContext: string | undefined;
     if (project?.ragEnabled && activeProvider.embedding) {
       try {
-        const currentNode = conversation.nodes[selectedNodeId];
-        if (currentNode?.content) {
+        const freshConv = useConversationStore.getState().conversation!;
+        const targetNode = freshConv.nodes[targetNodeId];
+        if (targetNode?.content) {
           const ragResults = await searchKnowledge(
-            conversation.projectId,
-            currentNode.content,
+            freshConv.projectId,
+            targetNode.content,
             activeProvider.apiUrl,
             activeProvider.apiKey,
             activeProvider.embedding.model,
@@ -155,10 +161,11 @@ export function ChatPanel({
       }
     }
 
-    // 构建上下文
+    // 获取最新节点数据用于构建上下文
+    const freshNodes = useConversationStore.getState().conversation!.nodes;
     const context = buildContext({
-      nodes: conversation.nodes,
-      currentNodeId: selectedNodeId,
+      nodes: freshNodes,
+      currentNodeId: targetNodeId,
       projectDescription: project?.description,
       ragContext,
       maxTokens: activeProvider.maxContextTokens,
@@ -217,6 +224,24 @@ export function ChatPanel({
     onSelectNode,
   ]);
 
+  // 发送消息（自动触发 AI 生成）
+  const handleSend = useCallback(async () => {
+    if (!inputText.trim() && attachments.length === 0) return;
+    const node = conversationService.createNode(
+      conversation.id,
+      "user",
+      inputText.trim(),
+      selectedNodeId,
+      attachments.length > 0 ? [...attachments] : undefined
+    );
+    await addNodeAndSave(node);
+    setInputText("");
+    clearAttachments();
+    onSelectNode(node.id);
+    // 自动生成 AI 回复
+    handleGenerate(node.id);
+  }, [inputText, attachments, conversation.id, selectedNodeId, addNodeAndSave, onSelectNode, clearAttachments, handleGenerate]);
+
   // 中断生成
   const handleStop = useCallback(() => {
     abortControllerRef.current?.abort();
@@ -228,8 +253,7 @@ export function ChatPanel({
     const parentId = currentNode.parentId;
     if (!parentId) return;
     onSelectNode(parentId);
-    // 稍等 state 更新后生成
-    setTimeout(() => handleGenerate(), 100);
+    handleGenerate(parentId);
   }, [currentNode, onSelectNode, handleGenerate]);
 
   // 编辑节点内容（编辑模式下双击）
@@ -334,7 +358,7 @@ export function ChatPanel({
           ) : (
             <>
               {canGenerate && (
-                <Button size="sm" onClick={handleGenerate}>
+                <Button size="sm" onClick={() => handleGenerate()}>
                   <Bot className="h-3 w-3 mr-1" />
                   生成回复
                 </Button>
@@ -366,11 +390,76 @@ export function ChatPanel({
 
       {/* 输入区域 */}
       <div className="border-t p-3">
+        {/* 附件预览 */}
+        {attachments.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-2">
+            {attachments.map((att) => (
+              <div
+                key={att.id}
+                className="relative group/att flex items-center gap-1.5 px-2 py-1 rounded-lg border bg-muted/50 text-xs"
+              >
+                {att.type === "image" ? (
+                  <img
+                    src={att.data}
+                    alt={att.filename}
+                    className="h-8 w-8 object-cover rounded"
+                  />
+                ) : (
+                  <>
+                    <FileText className="h-3 w-3 text-muted-foreground" />
+                    <span className="max-w-[100px] truncate">{att.filename}</span>
+                  </>
+                )}
+                <button
+                  className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center opacity-0 group-hover/att:opacity-100 transition-opacity"
+                  onClick={() => removeAttachment(att.id)}
+                >
+                  <X className="h-2.5 w-2.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="flex gap-2">
+          <div className="flex items-end gap-0.5">
+            <TooltipProvider delayDuration={300}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={pickImages}
+                    disabled={isGenerating}
+                  >
+                    <ImageIcon className="h-3.5 w-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top"><p>上传图片</p></TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+            <TooltipProvider delayDuration={300}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={pickDocuments}
+                    disabled={isGenerating}
+                  >
+                    <FileText className="h-3.5 w-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top"><p>上传文档</p></TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
           <textarea
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
-            placeholder="输入消息..."
+            onPaste={handlePaste}
+            placeholder="输入消息...（可粘贴图片）"
             className="flex-1 min-h-[60px] max-h-[150px] p-2 border rounded-md bg-background text-sm resize-y outline-none focus:ring-1 focus:ring-ring"
             disabled={isGenerating}
             onKeyDown={(e) => {
@@ -384,13 +473,13 @@ export function ChatPanel({
             size="icon"
             className="self-end h-9 w-9"
             onClick={handleSend}
-            disabled={!inputText.trim() || isGenerating}
+            disabled={(!inputText.trim() && attachments.length === 0) || isGenerating}
           >
             <Send className="h-4 w-4" />
           </Button>
         </div>
         <p className="text-[10px] text-muted-foreground mt-1">
-          Enter 发送，Shift+Enter 换行
+          Enter 发送，Shift+Enter 换行，Ctrl+V 粘贴图片
         </p>
       </div>
     </div>
@@ -426,6 +515,7 @@ function MessageBubble({
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const nodeAttachments = node.attachments || [];
 
   // 双击进入编辑
   const handleDoubleClick = useCallback(() => {
@@ -503,6 +593,12 @@ function MessageBubble({
         {node.isUserEdited && (
           <span className="text-[10px] text-purple-500">已编辑</span>
         )}
+        {nodeAttachments.length > 0 && (
+          <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+            <Paperclip className="h-2.5 w-2.5" />
+            {nodeAttachments.length}
+          </span>
+        )}
 
         <div className="ml-auto flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
           <TooltipProvider delayDuration={300}>
@@ -560,6 +656,30 @@ function MessageBubble({
           )}
         </div>
       </div>
+
+      {/* 附件展示 */}
+      {nodeAttachments.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-1.5">
+          {nodeAttachments.map((att) =>
+            att.type === "image" ? (
+              <img
+                key={att.id}
+                src={att.data}
+                alt={att.filename}
+                className="max-h-[120px] max-w-full rounded border"
+              />
+            ) : (
+              <span
+                key={att.id}
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted text-[10px] text-muted-foreground"
+              >
+                <FileText className="h-2.5 w-2.5" />
+                {att.filename}
+              </span>
+            )
+          )}
+        </div>
+      )}
 
       {/* 编辑模式下的内联编辑 */}
       {isEditing ? (
