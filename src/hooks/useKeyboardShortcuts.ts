@@ -4,11 +4,12 @@ import { useEffect, useCallback } from "react";
  * 快捷键映射定义
  *
  * 全局快捷键（已在 CanvasView 中实现）：
- * - Ctrl+E: 切换编辑模式
  * - Ctrl+F: 切换搜索面板
- * - Ctrl+Z: 撤销（编辑模式）
- * - Ctrl+Y: 重做（编辑模式）
- * - Delete: 删除选中节点（编辑模式）
+ * - Ctrl+B: 切换批量操作模式
+ * - Ctrl+Z: 撤销
+ * - Ctrl+Y: 重做
+ * - Delete: 删除选中节点或断开选中边
+ * - Escape: 退出批量模式 / 对话模式返回画布
  */
 
 interface ShortcutConfig {
@@ -35,7 +36,7 @@ interface ShortcutConfig {
  * @example
  * ```tsx
  * useKeyboardShortcuts([
- *   { key: 'e', ctrl: true, handler: () => toggleEditMode() },
+ *   { key: 'b', ctrl: true, handler: () => toggleBatchMode() },
  *   { key: 'f', ctrl: true, handler: () => toggleSearch() },
  *   { key: 'z', ctrl: true, handler: () => undo() },
  *   { key: 'y', ctrl: true, handler: () => redo() },

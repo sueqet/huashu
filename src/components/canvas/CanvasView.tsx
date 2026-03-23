@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import {
   ReactFlow,
   Background,
@@ -11,16 +11,19 @@ import {
   type NodeMouseHandler,
   type Node as FlowNode,
   type Edge,
+  type Connection,
+  type EdgeMouseHandler,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
 import { useConversationStore } from "@/stores/conversation-store";
 import { useEditStore } from "@/stores/edit-store";
 import { ChatNodeComponent } from "./ChatNodeComponent";
-import { ChatPanel } from "./ChatPanel";
+import { ChatView } from "./ChatView";
 import { SearchPanel } from "./SearchPanel";
 import { EditToolbar } from "./EditToolbar";
 import { computeTreeLayout } from "@/lib/tree-layout";
+import { isAncestor, collectDescendantIds } from "@/lib/tree-utils";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Plus, Search } from "lucide-react";
 import { conversationService } from "@/services";
@@ -29,6 +32,8 @@ const nodeTypes = {
   chatNode: ChatNodeComponent,
 };
 
+type CanvasMode = "edit" | "chat";
+
 interface CanvasViewProps {
   projectId: string;
   conversationId: string;
@@ -36,15 +41,11 @@ interface CanvasViewProps {
   onOpenConversation?: (conversationId: string, nodeId: string) => void;
 }
 
-/**
- * Helper component rendered inside <ReactFlow> to pan/zoom to a specific node.
- */
 function FitToNode({ nodeId }: { nodeId: string | null }) {
   const { getNode, setCenter } = useReactFlow();
 
   useEffect(() => {
     if (!nodeId) return;
-    // Small delay to ensure layout has been applied
     const timer = setTimeout(() => {
       const node = getNode(nodeId);
       if (node) {
@@ -78,29 +79,38 @@ function CanvasViewInner({
     loadConversation,
     addNodeAndSave,
     removeNodeTreeAndSave,
+    detachNodeAndSave,
+    reconnectNodeAndSave,
     restoreConversation,
   } = useConversationStore();
 
-  const isEditMode = useEditStore((s) => s.isEditMode);
   const isBatchMode = useEditStore((s) => s.isBatchMode);
   const batchSelectedIds = useEditStore((s) => s.batchSelectedIds);
   const takeSnapshot = useEditStore((s) => s.takeSnapshot);
   const editUndo = useEditStore((s) => s.undo);
   const editRedo = useEditStore((s) => s.redo);
+  const selectedEdgeId = useEditStore((s) => s.selectedEdgeId);
+  const setSelectedEdge = useEditStore((s) => s.setSelectedEdge);
+
+  const { setNodes: rfSetNodes } = useReactFlow();
 
   const [nodes, setNodes, onNodesChange] = useNodesState([] as FlowNode[]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([] as Edge[]);
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [showChatPanel, setShowChatPanel] = useState(false);
+  const [mode, setMode] = useState<CanvasMode>("edit");
+  const [chatNodeId, setChatNodeId] = useState<string | null>(null);
   const [showSearchPanel, setShowSearchPanel] = useState(false);
+
+  // 记录拖拽起始位置，用于子树跟随移动
+  const dragStartPositions = useRef<Map<string, { x: number; y: number }>>(new Map());
 
   // 加载对话
   useEffect(() => {
     loadConversation(projectId, conversationId);
   }, [projectId, conversationId, loadConversation]);
 
-  // 计算布局 - 包含批量选择信息
+  // 计算布局
   useEffect(() => {
     if (!conversation) return;
     const { flowNodes, flowEdges } = computeTreeLayout(
@@ -109,44 +119,149 @@ function CanvasViewInner({
       collapsedIds
     );
 
-    // 编辑模式下允许拖拽；注入 batchIndex
     const batchIdSet = new Map<string, number>();
     batchSelectedIds.forEach((id, idx) => batchIdSet.set(id, idx));
 
     const processedNodes = flowNodes.map((node) => ({
       ...node,
-      draggable: isEditMode,
+      draggable: true, // 始终可拖拽
       data: {
         ...node.data,
         batchIndex: batchIdSet.has(node.id) ? batchIdSet.get(node.id)! : null,
       },
     }));
 
-    setNodes(processedNodes);
-    setEdges(flowEdges);
-  }, [conversation, collapsedIds, setNodes, setEdges, isEditMode, batchSelectedIds]);
+    // 边样式：选中的边高亮
+    const processedEdges = flowEdges.map((edge) => ({
+      ...edge,
+      selected: edge.id === selectedEdgeId,
+      style: edge.id === selectedEdgeId
+        ? { stroke: "#ef4444", strokeWidth: 2.5 }
+        : { stroke: "#94a3b8", strokeWidth: 1.5 },
+    }));
 
-  // 节点点击：正常模式选中，批量模式添加到选择
+    setNodes(processedNodes);
+    setEdges(processedEdges);
+  }, [conversation, collapsedIds, setNodes, setEdges, batchSelectedIds, selectedEdgeId]);
+
+  // 节点点击
   const onNodeClick: NodeMouseHandler = useCallback(
     (_event, node) => {
       if (isBatchMode) {
         useEditStore.getState().addBatchNode(node.id);
       } else {
         setSelectedNodeId(node.id);
+        setSelectedEdge(null); // 取消边选择
       }
+    },
+    [isBatchMode, setSelectedEdge]
+  );
+
+  // 双击节点 → 进入对话模式
+  const onNodeDoubleClick: NodeMouseHandler = useCallback(
+    (_event, node) => {
+      if (isBatchMode) return;
+      setSelectedNodeId(node.id);
+      setChatNodeId(node.id);
+      setMode("chat");
     },
     [isBatchMode]
   );
 
-  // 节点双击：打开对话面板
-  const onNodeDoubleClick: NodeMouseHandler = useCallback(
-    (_event, node) => {
-      if (isBatchMode) return; // 批量模式下不打开面板
-      setSelectedNodeId(node.id);
-      setShowChatPanel(true);
+  // 边点击 → 选中边
+  const onEdgeClick: EdgeMouseHandler = useCallback(
+    (_event, edge) => {
+      setSelectedEdge(edge.id);
+      setSelectedNodeId(null);
     },
-    [isBatchMode]
+    [setSelectedEdge]
   );
+
+  // 画布空白处点击 → 取消选择
+  const onPaneClick = useCallback(() => {
+    setSelectedNodeId(null);
+    setSelectedEdge(null);
+  }, [setSelectedEdge]);
+
+  // 连接验证：防止循环连接和自连接
+  const isValidConnection = useCallback(
+    (connection: Connection | Edge) => {
+      if (!conversation) return false;
+      const { source, target } = connection;
+      if (!source || !target) return false;
+      if (source === target) return false;
+      // target 不能是 source 的祖先（否则会形成循环）
+      if (isAncestor(conversation.nodes, target, source)) return false;
+      return true;
+    },
+    [conversation]
+  );
+
+  // 连接处理：建立新的父子关系
+  const onConnect = useCallback(
+    async (connection: Connection) => {
+      if (!conversation) return;
+      const { source, target } = connection;
+      if (!source || !target) return;
+
+      takeSnapshot(conversation);
+      // source 是父节点（从 source handle 拖出），target 是子节点（连到 target handle）
+      await reconnectNodeAndSave(target, source);
+    },
+    [conversation, takeSnapshot, reconnectNodeAndSave]
+  );
+
+  // 子树拖拽：拖拽时带动所有后代节点
+  const onNodeDragStart = useCallback(
+    (_event: React.MouseEvent, node: FlowNode) => {
+      if (!conversation) return;
+      const descendantIds = collectDescendantIds(conversation.nodes, node.id);
+      const posMap = new Map<string, { x: number; y: number }>();
+
+      // 记录所有后代节点的当前位置（相对于被拖拽节点的偏移）
+      const draggedNode = nodes.find((n) => n.id === node.id);
+      if (!draggedNode) return;
+
+      for (const id of descendantIds) {
+        const n = nodes.find((nd) => nd.id === id);
+        if (n) {
+          posMap.set(id, {
+            x: n.position.x - draggedNode.position.x,
+            y: n.position.y - draggedNode.position.y,
+          });
+        }
+      }
+      dragStartPositions.current = posMap;
+    },
+    [conversation, nodes]
+  );
+
+  const onNodeDrag = useCallback(
+    (_event: React.MouseEvent, node: FlowNode) => {
+      if (dragStartPositions.current.size === 0) return;
+
+      rfSetNodes((nds) =>
+        nds.map((n) => {
+          const offset = dragStartPositions.current.get(n.id);
+          if (offset) {
+            return {
+              ...n,
+              position: {
+                x: node.position.x + offset.x,
+                y: node.position.y + offset.y,
+              },
+            };
+          }
+          return n;
+        })
+      );
+    },
+    [rfSetNodes]
+  );
+
+  const onNodeDragStop = useCallback(() => {
+    dragStartPositions.current = new Map();
+  }, []);
 
   // 折叠/展开
   const toggleCollapse = useCallback((nodeId: string) => {
@@ -164,9 +279,7 @@ function CanvasViewInner({
   // 创建根节点
   const handleCreateRoot = useCallback(async () => {
     if (!conversation) return;
-    if (isEditMode) {
-      takeSnapshot(conversation);
-    }
+    takeSnapshot(conversation);
     const node = conversationService.createNode(
       conversation.id,
       "user",
@@ -175,28 +288,48 @@ function CanvasViewInner({
     );
     await addNodeAndSave(node);
     setSelectedNodeId(node.id);
-    setShowChatPanel(true);
-  }, [conversation, addNodeAndSave, isEditMode, takeSnapshot]);
+    setChatNodeId(node.id);
+    setMode("chat");
+  }, [conversation, addNodeAndSave, takeSnapshot]);
 
   // 删除选中节点
   const handleDeleteSelected = useCallback(async () => {
-    if (!selectedNodeId || !conversation) return;
-    if (!conversation.nodes[selectedNodeId]) return;
+    if (!conversation) return;
 
-    if (isEditMode) {
-      takeSnapshot(conversation);
+    // 优先处理选中的边（断开连接）
+    if (selectedEdgeId) {
+      const edge = edges.find((e) => e.id === selectedEdgeId);
+      if (edge) {
+        takeSnapshot(conversation);
+        await detachNodeAndSave(edge.target);
+        setSelectedEdge(null);
+      }
+      return;
     }
 
+    // 其次处理选中的节点
+    if (!selectedNodeId) return;
+    if (!conversation.nodes[selectedNodeId]) return;
+
+    takeSnapshot(conversation);
     await removeNodeTreeAndSave(selectedNodeId);
     setSelectedNodeId(null);
-  }, [selectedNodeId, conversation, removeNodeTreeAndSave, isEditMode, takeSnapshot]);
+  }, [
+    selectedNodeId,
+    selectedEdgeId,
+    conversation,
+    edges,
+    removeNodeTreeAndSave,
+    detachNodeAndSave,
+    takeSnapshot,
+    setSelectedEdge,
+  ]);
 
-  // 批量构建新树：将选中的节点重组为线性链
+  // 批量构建新树
   const handleBatchBuildTree = useCallback(async () => {
     if (!conversation) return;
     if (batchSelectedIds.length < 2) return;
 
-    // 确认
     const confirmed = window.confirm(
       `将 ${batchSelectedIds.length} 个选中节点构建为新的线性树？\n` +
       `第一个节点将成为根节点，后续节点依次成为子节点。\n` +
@@ -206,7 +339,6 @@ function CanvasViewInner({
 
     takeSnapshot(conversation);
 
-    // 操作：直接修改 conversation 并 restore
     const conv = JSON.parse(JSON.stringify(conversation)) as typeof conversation;
 
     for (let i = 0; i < batchSelectedIds.length; i++) {
@@ -214,7 +346,6 @@ function CanvasViewInner({
       const node = conv.nodes[nodeId];
       if (!node) continue;
 
-      // 断开与原父节点的连接
       if (node.parentId) {
         const oldParent = conv.nodes[node.parentId];
         if (oldParent) {
@@ -222,15 +353,12 @@ function CanvasViewInner({
         }
       }
 
-      // 从 rootNodeIds 中移除（如果之前是根节点）
       conv.rootNodeIds = conv.rootNodeIds.filter((id) => id !== nodeId);
 
       if (i === 0) {
-        // 第一个节点成为根节点
         node.parentId = null;
         conv.rootNodeIds.push(nodeId);
       } else {
-        // 后续节点成为前一个节点的子节点
         const prevNodeId = batchSelectedIds[i - 1];
         node.parentId = prevNodeId;
 
@@ -246,7 +374,59 @@ function CanvasViewInner({
     useEditStore.getState().clearBatchSelection();
   }, [conversation, batchSelectedIds, takeSnapshot, restoreConversation]);
 
-  // 批量删除选中节点及其子树
+  // 批量复制为新树：克隆节点形成新的独立树
+  const handleBatchCopyTree = useCallback(async () => {
+    if (!conversation) return;
+    if (batchSelectedIds.length < 1) return;
+
+    const confirmed = window.confirm(
+      `将 ${batchSelectedIds.length} 个选中节点复制为新的线性树？\n` +
+      `原节点不会被修改，将创建副本。`
+    );
+    if (!confirmed) return;
+
+    takeSnapshot(conversation);
+
+    const conv = JSON.parse(JSON.stringify(conversation)) as typeof conversation;
+    const now = Date.now();
+
+    let prevNewId: string | null = null;
+    for (let i = 0; i < batchSelectedIds.length; i++) {
+      const originalNode = conv.nodes[batchSelectedIds[i]];
+      if (!originalNode) continue;
+
+      // 创建副本节点
+      const newNode = conversationService.createNode(
+        conversation.id,
+        originalNode.role,
+        originalNode.content,
+        prevNewId
+      );
+      newNode.modelName = originalNode.modelName;
+      newNode.isUserEdited = true;
+      newNode.createdAt = now;
+      newNode.updatedAt = now;
+
+      conv.nodes[newNode.id] = newNode;
+
+      if (i === 0) {
+        conv.rootNodeIds.push(newNode.id);
+      } else if (prevNewId) {
+        const prevNode = conv.nodes[prevNewId];
+        if (prevNode && !prevNode.childrenIds.includes(newNode.id)) {
+          prevNode.childrenIds.push(newNode.id);
+        }
+      }
+
+      prevNewId = newNode.id;
+    }
+
+    conv.updatedAt = now;
+    await restoreConversation(conv);
+    useEditStore.getState().clearBatchSelection();
+  }, [conversation, batchSelectedIds, takeSnapshot, restoreConversation]);
+
+  // 批量删除
   const handleBatchDelete = useCallback(async () => {
     if (!conversation) return;
     if (batchSelectedIds.length === 0) return;
@@ -258,11 +438,8 @@ function CanvasViewInner({
 
     takeSnapshot(conversation);
 
-    // 为避免删除顺序问题（删父节点后子节点已被级联删除），
-    // 先收集所有要删除的节点树，然后一次性在快照上操作
     const conv = JSON.parse(JSON.stringify(conversation)) as typeof conversation;
 
-    // 收集所有需要删除的节点ID（包括子树）
     const allToRemove = new Set<string>();
     const collectSubtree = (id: string) => {
       allToRemove.add(id);
@@ -278,7 +455,6 @@ function CanvasViewInner({
       }
     }
 
-    // 断开与父节点的连接（只处理选中的顶层节点）
     for (const nodeId of batchSelectedIds) {
       const node = conv.nodes[nodeId];
       if (!node) continue;
@@ -291,7 +467,6 @@ function CanvasViewInner({
       conv.rootNodeIds = conv.rootNodeIds.filter((id) => id !== nodeId);
     }
 
-    // 删除所有节点
     for (const id of allToRemove) {
       delete conv.nodes[id];
     }
@@ -299,7 +474,6 @@ function CanvasViewInner({
     conv.updatedAt = Date.now();
     await restoreConversation(conv);
 
-    // 清空选择并退出批量模式
     useEditStore.getState().clearBatchSelection();
     setSelectedNodeId(null);
   }, [conversation, batchSelectedIds, takeSnapshot, restoreConversation]);
@@ -324,32 +498,29 @@ function CanvasViewInner({
 
   // 键盘事件
   useEffect(() => {
+    if (mode === "chat") return; // 对话模式下由 ChatView 处理
+
     const handler = (e: KeyboardEvent) => {
-      // Ctrl+F：切换搜索面板
+      // 忽略输入框中的非修饰键
+      const target = e.target as HTMLElement;
+      const isInput =
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable;
+
+      // Ctrl+F：搜索
       if (e.ctrlKey && e.key === "f") {
         e.preventDefault();
         setShowSearchPanel((prev) => !prev);
         return;
       }
 
-      // Ctrl+E：切换编辑模式
-      if (e.ctrlKey && e.key === "e") {
+      // Ctrl+B：批量模式
+      if (e.ctrlKey && e.key === "b") {
         e.preventDefault();
-        useEditStore.getState().toggleEditMode();
+        useEditStore.getState().toggleBatchMode();
         return;
       }
-
-      // Ctrl+B：切换批量操作模式（仅在编辑模式下）
-      if (e.ctrlKey && e.key === "b") {
-        if (useEditStore.getState().isEditMode) {
-          e.preventDefault();
-          useEditStore.getState().toggleBatchMode();
-          return;
-        }
-      }
-
-      // 以下快捷键仅在编辑模式下生效
-      if (!useEditStore.getState().isEditMode) return;
 
       // Ctrl+Z：撤销
       if (e.ctrlKey && e.key === "z" && !e.shiftKey) {
@@ -368,7 +539,10 @@ function CanvasViewInner({
         return;
       }
 
-      // Delete：删除选中节点
+      // 以下仅在非输入框时
+      if (isInput) return;
+
+      // Delete：删除选中边或节点
       if (e.key === "Delete") {
         e.preventDefault();
         handleDeleteSelected();
@@ -385,9 +559,9 @@ function CanvasViewInner({
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [handleUndo, handleRedo, handleDeleteSelected]);
+  }, [mode, handleUndo, handleRedo, handleDeleteSelected]);
 
-  // 右键菜单处理：批量模式下右键撤销最后选择
+  // 右键菜单：批量模式下撤销最后选择
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (useEditStore.getState().isBatchMode) {
@@ -412,7 +586,7 @@ function CanvasViewInner({
     };
   }, [handleUndo, handleRedo]);
 
-  // 画布节点折叠/展开自定义事件（由 ChatNodeComponent 的 chevron 点击触发）
+  // 折叠/展开自定义事件
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<{ nodeId: string }>).detail;
@@ -434,6 +608,24 @@ function CanvasViewInner({
 
   const convName = conversation?.name || "对话";
 
+  // ===== 对话模式 =====
+  if (mode === "chat" && chatNodeId && conversation) {
+    return (
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <ChatView
+          conversation={conversation}
+          selectedNodeId={chatNodeId}
+          onBack={() => {
+            setMode("edit");
+            setSelectedNodeId(chatNodeId);
+          }}
+          onSelectNode={(nodeId) => setChatNodeId(nodeId)}
+        />
+      </div>
+    );
+  }
+
+  // ===== 编辑模式 =====
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       {/* 顶部工具栏 */}
@@ -442,13 +634,6 @@ function CanvasViewInner({
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <h3 className="text-sm font-medium truncate">{convName}</h3>
-
-        {/* 编辑模式指示 */}
-        {isEditMode && (
-          <span className="text-xs text-orange-600 bg-orange-50 px-2 py-0.5 rounded border border-orange-200">
-            编辑模式
-          </span>
-        )}
 
         {/* 批量模式指示 */}
         {isBatchMode && (
@@ -462,8 +647,9 @@ function CanvasViewInner({
         {/* 编辑工具栏 */}
         <EditToolbar
           onDeleteSelected={handleDeleteSelected}
-          hasSelection={!!selectedNodeId}
+          hasSelection={!!selectedNodeId || !!selectedEdgeId}
           onBatchBuildTree={handleBatchBuildTree}
+          onBatchCopyTree={handleBatchCopyTree}
           onBatchDelete={handleBatchDelete}
           batchCount={batchSelectedIds.length}
         />
@@ -484,9 +670,8 @@ function CanvasViewInner({
         </Button>
       </div>
 
-      {/* 画布 + 对话面板 */}
+      {/* 画布 */}
       <div className="flex-1 flex overflow-hidden">
-        {/* React Flow 画布 */}
         <div className="flex-1">
           <ReactFlow
             nodes={nodes}
@@ -496,10 +681,19 @@ function CanvasViewInner({
             onEdgesChange={onEdgesChange}
             onNodeClick={onNodeClick}
             onNodeDoubleClick={onNodeDoubleClick}
+            onEdgeClick={onEdgeClick}
+            onPaneClick={onPaneClick}
+            onConnect={onConnect}
+            onNodeDragStart={onNodeDragStart}
+            onNodeDrag={onNodeDrag}
+            onNodeDragStop={onNodeDragStop}
+            isValidConnection={isValidConnection}
             fitView
             minZoom={0.1}
             maxZoom={2}
-            nodesDraggable={isEditMode}
+            nodesDraggable={true}
+            elementsSelectable={true}
+            connectOnClick={false}
             defaultEdgeOptions={{
               type: "smoothstep",
               style: { stroke: "#94a3b8", strokeWidth: 1.5 },
@@ -523,27 +717,14 @@ function CanvasViewInner({
             onClose={() => setShowSearchPanel(false)}
             onNavigate={(convId, nodeId) => {
               if (convId === conversationId) {
-                // 同一对话：直接跳转到节点
                 setSelectedNodeId(nodeId);
-                setShowChatPanel(true);
+                setChatNodeId(nodeId);
+                setMode("chat");
                 setShowSearchPanel(false);
               } else if (onOpenConversation) {
-                // 不同对话：通知父组件切换
                 onOpenConversation(convId, nodeId);
               }
             }}
-          />
-        )}
-
-        {/* 对话面板 */}
-        {showChatPanel && selectedNodeId && conversation && (
-          <ChatPanel
-            conversation={conversation}
-            selectedNodeId={selectedNodeId}
-            onClose={() => setShowChatPanel(false)}
-            onToggleCollapse={toggleCollapse}
-            onSelectNode={setSelectedNodeId}
-            collapsedIds={collapsedIds}
           />
         )}
       </div>

@@ -8,12 +8,12 @@ import { conversationService, buildContext, streamChatCompletion } from "@/servi
 import { searchKnowledge } from "@/services/rag-service";
 import { Button } from "@/components/ui/button";
 import {
-  X,
+  ArrowLeft,
   Send,
   Pin,
   PinOff,
-  ChevronDown,
   ChevronRight,
+  ChevronLeft,
   Star,
   Bot,
   Square,
@@ -27,13 +27,11 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-interface ChatPanelProps {
+interface ChatViewProps {
   conversation: Conversation;
   selectedNodeId: string;
-  onClose: () => void;
-  onToggleCollapse: (nodeId: string) => void;
+  onBack: () => void;
   onSelectNode: (nodeId: string) => void;
-  collapsedIds: Set<string>;
 }
 
 function traceMessages(
@@ -51,14 +49,12 @@ function traceMessages(
   return messages;
 }
 
-export function ChatPanel({
+export function ChatView({
   conversation,
   selectedNodeId,
-  onClose,
-  onToggleCollapse,
+  onBack,
   onSelectNode,
-  collapsedIds,
-}: ChatPanelProps) {
+}: ChatViewProps) {
   const { addNodeAndSave, updateNodeAndSave } = useConversationStore();
   const takeSnapshot = useEditStore((s) => s.takeSnapshot);
   const config = useConfigStore((s) => s.config);
@@ -70,6 +66,7 @@ export function ChatPanel({
   const [error, setError] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const messages = useMemo(
     () => traceMessages(conversation.nodes, selectedNodeId),
@@ -79,7 +76,6 @@ export function ChatPanel({
   const currentNode = conversation.nodes[selectedNodeId];
   const project = projects.find((p) => p.id === conversation.projectId);
 
-  // 获取当前活跃的 API 配置
   const activeProvider = config?.providers.find(
     (p) => p.id === config.activeProviderId
   );
@@ -88,6 +84,28 @@ export function ChatPanel({
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streamingContent]);
+
+  // 自动聚焦输入框
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, [selectedNodeId]);
+
+  // Escape 返回编辑模式
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !isGenerating) {
+        const target = e.target as HTMLElement;
+        const isInputFocused =
+          target.tagName === "TEXTAREA" || target.tagName === "INPUT";
+        // 如果在输入框中且有内容，先不退出
+        if (isInputFocused && inputText.trim()) return;
+        e.preventDefault();
+        onBack();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onBack, isGenerating, inputText]);
 
   // 发送消息
   const handleSend = useCallback(async () => {
@@ -114,7 +132,6 @@ export function ChatPanel({
     setStreamingContent("");
     setError(null);
 
-    // 创建 AI 回复节点（初始为空，标记为 partial）
     const aiNode = conversationService.createNode(
       conversation.id,
       "assistant",
@@ -127,7 +144,7 @@ export function ChatPanel({
     await addNodeAndSave(aiNode);
     onSelectNode(aiNode.id);
 
-    // RAG 检索（如果项目启用了 RAG）
+    // RAG 检索
     let ragContext: string | undefined;
     if (project?.ragEnabled && activeProvider.embedding) {
       try {
@@ -155,7 +172,6 @@ export function ChatPanel({
       }
     }
 
-    // 构建上下文
     const context = buildContext({
       nodes: conversation.nodes,
       currentNodeId: selectedNodeId,
@@ -165,7 +181,6 @@ export function ChatPanel({
       model: activeModel,
     });
 
-    // 流式调用
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
@@ -217,22 +232,18 @@ export function ChatPanel({
     onSelectNode,
   ]);
 
-  // 中断生成
   const handleStop = useCallback(() => {
     abortControllerRef.current?.abort();
   }, []);
 
-  // 重新生成（在当前节点的父节点下创建新分支）
   const handleRegenerate = useCallback(async () => {
     if (!currentNode || currentNode.role !== "assistant") return;
     const parentId = currentNode.parentId;
     if (!parentId) return;
     onSelectNode(parentId);
-    // 稍等 state 更新后生成
     setTimeout(() => handleGenerate(), 100);
   }, [currentNode, onSelectNode, handleGenerate]);
 
-  // 编辑节点内容（编辑模式下双击）
   const handleEditContent = useCallback(
     async (nodeId: string, newContent: string) => {
       if (!conversation) return;
@@ -255,195 +266,252 @@ export function ChatPanel({
     if (node) await updateNodeAndSave(nodeId, { isStarred: !node.isStarred });
   };
 
-  // 判断当前节点最后是用户消息（可以生成 AI 回复）
   const canGenerate =
     currentNode?.role === "user" && !isGenerating && !!activeProvider;
 
+  // 分支导航：查找当前节点在兄弟节点中的位置
+  const getBranchInfo = useCallback(
+    (nodeId: string) => {
+      const node = conversation.nodes[nodeId];
+      if (!node || !node.parentId) return null;
+      const parent = conversation.nodes[node.parentId];
+      if (!parent || parent.childrenIds.length <= 1) return null;
+      const index = parent.childrenIds.indexOf(nodeId);
+      return {
+        current: index + 1,
+        total: parent.childrenIds.length,
+        siblings: parent.childrenIds,
+        index,
+      };
+    },
+    [conversation.nodes]
+  );
+
+  // 切换到同一层的兄弟分支
+  const switchBranch = useCallback(
+    (nodeId: string, direction: -1 | 1) => {
+      const info = getBranchInfo(nodeId);
+      if (!info) return;
+      const newIndex = info.index + direction;
+      if (newIndex < 0 || newIndex >= info.total) return;
+      onSelectNode(info.siblings[newIndex]);
+    },
+    [getBranchInfo, onSelectNode]
+  );
+
   return (
-    <div className="w-[400px] border-l bg-background flex flex-col">
-      {/* 面板头部 */}
-      <div className="flex items-center justify-between px-4 py-2 border-b">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium">对话视图</span>
-          {activeModel && (
-            <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-              {activeModel}
-            </span>
-          )}
-        </div>
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClose}>
-          <X className="h-4 w-4" />
+    <div className="flex-1 flex flex-col overflow-hidden bg-background">
+      {/* 顶部栏 */}
+      <div className="flex items-center gap-3 px-4 py-3 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          onClick={onBack}
+          title="返回画布 (Escape)"
+        >
+          <ArrowLeft className="h-4 w-4" />
         </Button>
+        <h3 className="text-sm font-medium truncate">{conversation.name}</h3>
+        {activeModel && (
+          <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+            {activeModel}
+          </span>
+        )}
+        <div className="flex-1" />
+        <span className="text-xs text-muted-foreground">
+          Esc 返回画布
+        </span>
       </div>
 
-      {/* 消息列表 */}
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
-        {messages.map((msg) => (
-          <MessageBubble
-            key={msg.id}
-            node={msg}
-            isSelected={msg.id === selectedNodeId}
-            hasChildren={msg.childrenIds.length > 0}
-            isCollapsed={collapsedIds.has(msg.id)}
-            isEditMode={true}
-            onToggleCollapse={() => onToggleCollapse(msg.id)}
-            onTogglePin={() => togglePin(msg.id)}
-            onToggleStar={() => toggleStar(msg.id)}
-            onEditContent={(newContent) => handleEditContent(msg.id, newContent)}
-          />
-        ))}
+      {/* 消息列表 - 居中布局 */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-3xl mx-auto px-4 py-6 space-y-4">
+          {messages.map((msg) => {
+            const branchInfo = getBranchInfo(msg.id);
+            return (
+              <div key={msg.id}>
+                {/* 分支导航器 */}
+                {branchInfo && (
+                  <div className="flex items-center justify-center gap-2 mb-2">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      disabled={branchInfo.index === 0}
+                      onClick={() => switchBranch(msg.id, -1)}
+                    >
+                      <ChevronLeft className="h-3 w-3" />
+                    </Button>
+                    <span className="text-xs text-muted-foreground">
+                      分支 {branchInfo.current}/{branchInfo.total}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      disabled={branchInfo.index === branchInfo.total - 1}
+                      onClick={() => switchBranch(msg.id, 1)}
+                    >
+                      <ChevronRight className="h-3 w-3" />
+                    </Button>
+                  </div>
+                )}
+                <ChatBubble
+                  node={msg}
+                  isSelected={msg.id === selectedNodeId}
+                  onTogglePin={() => togglePin(msg.id)}
+                  onToggleStar={() => toggleStar(msg.id)}
+                  onEditContent={(newContent) => handleEditContent(msg.id, newContent)}
+                />
+              </div>
+            );
+          })}
 
-        {/* 流式生成中的内容 */}
-        {isGenerating && streamingContent && (
-          <div className="rounded-lg p-3 text-sm bg-green-50 border border-green-200">
-            <div className="flex items-center gap-1.5 mb-1.5">
-              <span className="text-xs font-medium text-green-600">AI</span>
-              <Loader2 className="h-3 w-3 animate-spin text-green-600" />
-              <span className="text-xs text-green-600">生成中...</span>
+          {/* 流式生成中 */}
+          {isGenerating && streamingContent && (
+            <div className="rounded-xl p-4 text-sm bg-green-50 border border-green-200">
+              <div className="flex items-center gap-1.5 mb-2">
+                <span className="text-xs font-medium text-green-600">AI</span>
+                <Loader2 className="h-3 w-3 animate-spin text-green-600" />
+                <span className="text-xs text-green-600">生成中...</span>
+              </div>
+              <div className="whitespace-pre-wrap break-words text-foreground/90 leading-relaxed">
+                {streamingContent}
+              </div>
             </div>
-            <div className="whitespace-pre-wrap break-words text-foreground/90 leading-relaxed">
-              {streamingContent}
+          )}
+
+          {error && (
+            <div className="rounded-xl p-4 text-sm bg-red-50 border border-red-200 text-red-600">
+              {error}
             </div>
-          </div>
-        )}
+          )}
 
-        {/* 错误信息 */}
-        {error && (
-          <div className="rounded-lg p-3 text-sm bg-red-50 border border-red-200 text-red-600">
-            {error}
-          </div>
-        )}
-
-        <div ref={messagesEndRef} />
+          <div ref={messagesEndRef} />
+        </div>
       </div>
 
       {/* 生成操作栏 */}
       {(canGenerate || isGenerating || currentNode?.role === "assistant") && (
-        <div className="px-4 py-2 border-t bg-muted/30 flex items-center gap-2">
-          {isGenerating ? (
-            <>
-              <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                <span>生成中...</span>
-              </div>
-              <Button size="sm" variant="outline" className="text-destructive border-destructive/30 hover:bg-destructive/10" onClick={handleStop}>
-                <Square className="h-3 w-3 mr-1" />
-                停止
-              </Button>
-            </>
-          ) : (
-            <>
-              {canGenerate && (
-                <Button size="sm" onClick={handleGenerate}>
-                  <Bot className="h-3 w-3 mr-1" />
-                  生成回复
+        <div className="border-t bg-muted/30">
+          <div className="max-w-3xl mx-auto px-4 py-2 flex items-center gap-2">
+            {isGenerating ? (
+              <>
+                <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <span>生成中...</span>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-destructive border-destructive/30 hover:bg-destructive/10"
+                  onClick={handleStop}
+                >
+                  <Square className="h-3 w-3 mr-1" />
+                  停止
                 </Button>
-              )}
-              {currentNode?.role === "assistant" && (
-                <Button size="sm" variant="outline" onClick={handleRegenerate}>
-                  <RefreshCw className="h-3 w-3 mr-1" />
-                  重新生成
-                </Button>
-              )}
-            </>
-          )}
-          {!activeProvider && (
-            <span className="text-xs text-muted-foreground">
-              请先在设置中配置 API
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* 分支信息 */}
-      {currentNode && currentNode.childrenIds.length > 1 && (
-        <div className="px-4 py-2 border-t bg-muted/30">
-          <span className="text-xs text-muted-foreground">
-            {currentNode.childrenIds.length} 个分支
-          </span>
+              </>
+            ) : (
+              <>
+                {canGenerate && (
+                  <Button size="sm" onClick={handleGenerate}>
+                    <Bot className="h-3 w-3 mr-1" />
+                    生成回复
+                  </Button>
+                )}
+                {currentNode?.role === "assistant" && (
+                  <Button size="sm" variant="outline" onClick={handleRegenerate}>
+                    <RefreshCw className="h-3 w-3 mr-1" />
+                    重新生成
+                  </Button>
+                )}
+              </>
+            )}
+            {!activeProvider && (
+              <span className="text-xs text-muted-foreground">
+                请先在设置中配置 API
+              </span>
+            )}
+          </div>
         </div>
       )}
 
       {/* 输入区域 */}
-      <div className="border-t p-3">
-        <div className="flex gap-2">
-          <textarea
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            placeholder="输入消息..."
-            className="flex-1 min-h-[60px] max-h-[150px] p-2 border rounded-md bg-background text-sm resize-y outline-none focus:ring-1 focus:ring-ring"
-            disabled={isGenerating}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                handleSend();
-              }
-            }}
-          />
-          <Button
-            size="icon"
-            className="self-end h-9 w-9"
-            onClick={handleSend}
-            disabled={!inputText.trim() || isGenerating}
-          >
-            <Send className="h-4 w-4" />
-          </Button>
+      <div className="border-t bg-background">
+        <div className="max-w-3xl mx-auto p-4">
+          <div className="flex gap-2">
+            <textarea
+              ref={inputRef}
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              placeholder="输入消息..."
+              className="flex-1 min-h-[60px] max-h-[150px] p-3 border rounded-xl bg-background text-sm resize-y outline-none focus:ring-2 focus:ring-ring"
+              disabled={isGenerating}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend();
+                }
+                // 阻止 Escape 冒泡到全局处理（如果有内容）
+                if (e.key === "Escape" && inputText.trim()) {
+                  e.stopPropagation();
+                  setInputText("");
+                }
+              }}
+            />
+            <Button
+              size="icon"
+              className="self-end h-10 w-10 rounded-xl"
+              onClick={handleSend}
+              disabled={!inputText.trim() || isGenerating}
+            >
+              <Send className="h-4 w-4" />
+            </Button>
+          </div>
+          <p className="text-[10px] text-muted-foreground mt-1.5">
+            Enter 发送，Shift+Enter 换行
+          </p>
         </div>
-        <p className="text-[10px] text-muted-foreground mt-1">
-          Enter 发送，Shift+Enter 换行
-        </p>
       </div>
     </div>
   );
 }
 
-/* ============ 消息气泡 ============ */
+/* ============ 全屏消息气泡 ============ */
 
-interface MessageBubbleProps {
+interface ChatBubbleProps {
   node: ChatNode;
   isSelected: boolean;
-  hasChildren: boolean;
-  isCollapsed: boolean;
-  isEditMode: boolean;
-  onToggleCollapse: () => void;
   onTogglePin: () => void;
   onToggleStar: () => void;
   onEditContent: (newContent: string) => void;
 }
 
-function MessageBubble({
+function ChatBubble({
   node,
   isSelected,
-  hasChildren,
-  isCollapsed,
-  isEditMode,
-  onToggleCollapse,
   onTogglePin,
   onToggleStar,
   onEditContent,
-}: MessageBubbleProps) {
+}: ChatBubbleProps) {
   const isUser = node.role === "user";
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // 双击进入编辑
   const handleDoubleClick = useCallback(() => {
-    if (!isEditMode) return;
     setEditText(node.content);
     setIsEditing(true);
-  }, [isEditMode, node.content]);
+  }, [node.content]);
 
-  // 自动聚焦编辑框
   useEffect(() => {
     if (isEditing && textareaRef.current) {
       textareaRef.current.focus();
-      // 将光标移到末尾
       textareaRef.current.selectionStart = textareaRef.current.value.length;
     }
   }, [isEditing]);
 
-  // 保存编辑
   const saveEdit = useCallback(() => {
     if (editText !== node.content) {
       onEditContent(editText);
@@ -451,13 +519,11 @@ function MessageBubble({
     setIsEditing(false);
   }, [editText, node.content, onEditContent]);
 
-  // 取消编辑
   const cancelEdit = useCallback(() => {
     setIsEditing(false);
     setEditText("");
   }, []);
 
-  // 键盘处理
   const handleEditKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === "Enter" && !e.shiftKey) {
@@ -467,7 +533,6 @@ function MessageBubble({
         e.preventDefault();
         cancelEdit();
       }
-      // 阻止事件冒泡，防止触发画布快捷键
       e.stopPropagation();
     },
     [saveEdit, cancelEdit]
@@ -475,16 +540,14 @@ function MessageBubble({
 
   return (
     <div
-      className={`group relative rounded-lg p-3 text-sm ${
+      className={`group relative rounded-xl p-4 text-sm ${
         isUser
           ? "bg-blue-50 border border-blue-200"
           : "bg-green-50 border border-green-200"
-      } ${isSelected ? "ring-2 ring-primary/50" : ""} ${
-        isEditMode ? "cursor-text" : ""
-      }`}
+      } ${isSelected ? "ring-2 ring-primary/50" : ""}`}
       onDoubleClick={handleDoubleClick}
     >
-      <div className="flex items-center gap-1.5 mb-1.5">
+      <div className="flex items-center gap-1.5 mb-2">
         <span
           className={`text-xs font-medium ${
             isUser ? "text-blue-600" : "text-green-600"
@@ -509,11 +572,11 @@ function MessageBubble({
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
-                  className="p-0.5 rounded hover:bg-background/50"
+                  className="p-1 rounded hover:bg-background/50"
                   onClick={onToggleStar}
                 >
                   <Star
-                    className={`h-3 w-3 ${
+                    className={`h-3.5 w-3.5 ${
                       node.isStarred
                         ? "text-yellow-500 fill-yellow-500"
                         : "text-muted-foreground"
@@ -530,13 +593,13 @@ function MessageBubble({
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
-                  className="p-0.5 rounded hover:bg-background/50"
+                  className="p-1 rounded hover:bg-background/50"
                   onClick={onTogglePin}
                 >
                   {node.isPinned ? (
-                    <PinOff className="h-3 w-3 text-amber-500" />
+                    <PinOff className="h-3.5 w-3.5 text-amber-500" />
                   ) : (
-                    <Pin className="h-3 w-3 text-muted-foreground" />
+                    <Pin className="h-3.5 w-3.5 text-muted-foreground" />
                   )}
                 </button>
               </TooltipTrigger>
@@ -545,23 +608,9 @@ function MessageBubble({
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
-          {hasChildren && (
-            <button
-              className="p-0.5 rounded hover:bg-background/50"
-              onClick={onToggleCollapse}
-              title={isCollapsed ? "展开分支" : "折叠分支"}
-            >
-              {isCollapsed ? (
-                <ChevronRight className="h-3 w-3 text-muted-foreground" />
-              ) : (
-                <ChevronDown className="h-3 w-3 text-muted-foreground" />
-              )}
-            </button>
-          )}
         </div>
       </div>
 
-      {/* 编辑模式下的内联编辑 */}
       {isEditing ? (
         <div className="space-y-1.5">
           <textarea
@@ -570,7 +619,7 @@ function MessageBubble({
             onChange={(e) => setEditText(e.target.value)}
             onKeyDown={handleEditKeyDown}
             onBlur={saveEdit}
-            className="w-full min-h-[60px] max-h-[200px] p-2 border rounded bg-background text-sm resize-y outline-none focus:ring-1 focus:ring-ring"
+            className="w-full min-h-[80px] max-h-[300px] p-3 border rounded-lg bg-background text-sm resize-y outline-none focus:ring-1 focus:ring-ring"
           />
           <p className="text-[10px] text-muted-foreground">
             Enter 保存，Shift+Enter 换行，Esc 取消
@@ -583,7 +632,7 @@ function MessageBubble({
       )}
 
       {(node.isPinned || node.isStarred) && (
-        <div className="flex items-center gap-1 mt-1.5">
+        <div className="flex items-center gap-1 mt-2">
           {node.isPinned && (
             <span className="text-[10px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">
               已锁定

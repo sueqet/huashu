@@ -29,6 +29,10 @@ interface ConversationState {
   updateNodeAndSave: (nodeId: string, updates: Partial<ChatNode>) => Promise<void>;
   /** 删除节点子树并保存 */
   removeNodeTreeAndSave: (nodeId: string) => Promise<void>;
+  /** 断开节点与父节点的连接，使其成为根节点 */
+  detachNodeAndSave: (nodeId: string) => Promise<void>;
+  /** 将 sourceId 节点重新连接为 targetId 的子节点 */
+  reconnectNodeAndSave: (sourceId: string, targetId: string) => Promise<void>;
   /** 恢复对话状态（用于撤销/重做） */
   restoreConversation: (conv: Conversation) => Promise<void>;
 }
@@ -177,6 +181,68 @@ export const useConversationStore = create<ConversationState>()(
         await conversationService.saveConversation(conv);
       }
     },
+    detachNodeAndSave: async (nodeId) => {
+      set((state) => {
+        if (!state.conversation) return;
+        const node = state.conversation.nodes[nodeId];
+        if (!node) return;
+
+        // 从父节点的 childrenIds 中移除
+        if (node.parentId) {
+          const parent = state.conversation.nodes[node.parentId];
+          if (parent) {
+            parent.childrenIds = parent.childrenIds.filter((id) => id !== nodeId);
+          }
+        }
+
+        // 设为根节点
+        node.parentId = null;
+        if (!state.conversation.rootNodeIds.includes(nodeId)) {
+          state.conversation.rootNodeIds.push(nodeId);
+        }
+
+        state.conversation.updatedAt = Date.now();
+      });
+      const conv = get().conversation;
+      if (conv) {
+        await conversationService.saveConversation(conv);
+      }
+    },
+
+    reconnectNodeAndSave: async (sourceId, targetId) => {
+      set((state) => {
+        if (!state.conversation) return;
+        const sourceNode = state.conversation.nodes[sourceId];
+        const targetNode = state.conversation.nodes[targetId];
+        if (!sourceNode || !targetNode) return;
+
+        // 先从旧父节点断开
+        if (sourceNode.parentId) {
+          const oldParent = state.conversation.nodes[sourceNode.parentId];
+          if (oldParent) {
+            oldParent.childrenIds = oldParent.childrenIds.filter((id) => id !== sourceId);
+          }
+        }
+
+        // 从 rootNodeIds 中移除（如果之前是根节点）
+        state.conversation.rootNodeIds = state.conversation.rootNodeIds.filter(
+          (id) => id !== sourceId
+        );
+
+        // 连接到新父节点
+        sourceNode.parentId = targetId;
+        if (!targetNode.childrenIds.includes(sourceId)) {
+          targetNode.childrenIds.push(sourceId);
+        }
+
+        state.conversation.updatedAt = Date.now();
+      });
+      const conv = get().conversation;
+      if (conv) {
+        await conversationService.saveConversation(conv);
+      }
+    },
+
     restoreConversation: async (conv) => {
       set((state) => {
         state.conversation = conv;
