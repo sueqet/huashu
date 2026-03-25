@@ -34,6 +34,7 @@ export function ProjectDetail({
     loadConversationList,
     createConversation,
     deleteConversation,
+    renameConversation,
   } = useConversationStore();
 
   const project = projects.find((p) => p.id === projectId);
@@ -44,6 +45,8 @@ export function ProjectDetail({
   const [isCreatingConv, setIsCreatingConv] = useState(false);
   const [newConvName, setNewConvName] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [renamingConvId, setRenamingConvId] = useState<string | null>(null);
+  const [renameConvText, setRenameConvText] = useState("");
 
   useEffect(() => {
     loadConversationList(projectId);
@@ -314,13 +317,59 @@ export function ProjectDetail({
               <div
                 key={conv.id}
                 className="group flex items-center gap-3 p-3 border rounded-lg hover:bg-accent cursor-pointer transition-colors"
-                onClick={() => onOpenConversation(projectId, conv.id)}
+                onClick={() => {
+                  if (renamingConvId !== conv.id) {
+                    onOpenConversation(projectId, conv.id);
+                  }
+                }}
               >
                 <MessageSquare className="h-4 w-4 text-muted-foreground shrink-0" />
-                <span className="flex-1 text-sm truncate">{conv.name}</span>
+                {renamingConvId === conv.id ? (
+                  <input
+                    type="text"
+                    value={renameConvText}
+                    onChange={(e) => setRenameConvText(e.target.value)}
+                    className="flex-1 text-sm bg-transparent outline-none border-b border-primary"
+                    autoFocus
+                    onClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => {
+                      e.stopPropagation();
+                      if (e.key === "Enter") {
+                        const trimmed = renameConvText.trim();
+                        if (trimmed && trimmed !== conv.name) {
+                          renameConversation(projectId, conv.id, trimmed);
+                        }
+                        setRenamingConvId(null);
+                      } else if (e.key === "Escape") {
+                        setRenamingConvId(null);
+                      }
+                    }}
+                    onBlur={() => {
+                      const trimmed = renameConvText.trim();
+                      if (trimmed && trimmed !== conv.name) {
+                        renameConversation(projectId, conv.id, trimmed);
+                      }
+                      setRenamingConvId(null);
+                    }}
+                  />
+                ) : (
+                  <span className="flex-1 text-sm truncate">{conv.name}</span>
+                )}
                 <span className="text-xs text-muted-foreground shrink-0">
                   {formatTime(conv.updatedAt)}
                 </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 opacity-0 group-hover:opacity-100"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setRenamingConvId(conv.id);
+                    setRenameConvText(conv.name);
+                  }}
+                >
+                  <Pencil className="h-3 w-3" />
+                </Button>
                 <Button
                   variant="ghost"
                   size="icon"

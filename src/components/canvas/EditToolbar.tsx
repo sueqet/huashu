@@ -10,6 +10,7 @@ import {
   Copy,
   Trash,
   X,
+  Sparkles,
 } from "lucide-react";
 
 interface EditToolbarProps {
@@ -18,6 +19,7 @@ interface EditToolbarProps {
   onBatchBuildTree: () => void;
   onBatchCopyTree: () => void;
   onBatchDelete: () => void;
+  onBatchSummarize: () => void;
   batchCount: number;
 }
 
@@ -27,6 +29,7 @@ export function EditToolbar({
   onBatchBuildTree,
   onBatchCopyTree,
   onBatchDelete,
+  onBatchSummarize,
   batchCount,
 }: EditToolbarProps) {
   const isBatchMode = useEditStore((s) => s.isBatchMode);
@@ -127,6 +130,18 @@ export function EditToolbar({
           >
             <Copy className="h-4 w-4 mr-1" />
             复制为新树
+          </Button>
+
+          {/* AI 总结 */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onBatchSummarize}
+            disabled={batchCount < 1}
+            title="AI 总结选中节点内容，生成为新的根节点"
+          >
+            <Sparkles className="h-4 w-4 mr-1" />
+            总结
           </Button>
 
           {/* 批量删除 */}

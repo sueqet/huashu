@@ -17,16 +17,26 @@ import {
 import "@xyflow/react/dist/style.css";
 
 import { useConversationStore } from "@/stores/conversation-store";
+import { useConfigStore } from "@/stores/config-store";
 import { useEditStore } from "@/stores/edit-store";
 import { ChatNodeComponent } from "./ChatNodeComponent";
 import { ChatView } from "./ChatView";
 import { SearchPanel } from "./SearchPanel";
 import { EditToolbar } from "./EditToolbar";
+import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
 import { computeTreeLayout } from "@/lib/tree-layout";
 import { isAncestor, collectDescendantIds } from "@/lib/tree-utils";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Plus, Search } from "lucide-react";
-import { conversationService } from "@/services";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { ArrowLeft, Plus, Search, Loader2 } from "lucide-react";
+import { conversationService, streamChatCompletion } from "@/services";
 
 const nodeTypes = {
   chatNode: ChatNodeComponent,
@@ -82,6 +92,7 @@ function CanvasViewInner({
     detachNodeAndSave,
     reconnectNodeAndSave,
     restoreConversation,
+    renameConversation,
   } = useConversationStore();
 
   const isBatchMode = useEditStore((s) => s.isBatchMode);
@@ -101,6 +112,16 @@ function CanvasViewInner({
   const [mode, setMode] = useState<CanvasMode>("edit");
   const [chatNodeId, setChatNodeId] = useState<string | null>(null);
   const [showSearchPanel, setShowSearchPanel] = useState(false);
+  const [isRenamingConv, setIsRenamingConv] = useState(false);
+  const [renameText, setRenameText] = useState("");
+
+  // 总结对话框状态
+  const [showSummarizeDialog, setShowSummarizeDialog] = useState(false);
+  const [summarizePrompt, setSummarizePrompt] = useState("请总结以上对话的要点，保留关键信息，用简洁的语言概括。");
+  const [isSummarizing, setIsSummarizing] = useState(false);
+  const [summarizeContent, setSummarizeContent] = useState("");
+  const [summarizeError, setSummarizeError] = useState<string | null>(null);
+  const summarizeAbortRef = useRef<AbortController | null>(null);
 
   // 记录拖拽起始位置，用于子树跟随移动
   const dragStartPositions = useRef<Map<string, { x: number; y: number }>>(new Map());
@@ -478,6 +499,88 @@ function CanvasViewInner({
     setSelectedNodeId(null);
   }, [conversation, batchSelectedIds, takeSnapshot, restoreConversation]);
 
+  // 打开总结对话框
+  const handleBatchSummarize = useCallback(() => {
+    if (!conversation || batchSelectedIds.length === 0) return;
+    setSummarizeContent("");
+    setSummarizeError(null);
+    setShowSummarizeDialog(true);
+  }, [conversation, batchSelectedIds]);
+
+  // 执行 AI 总结
+  const executeSummarize = useCallback(async () => {
+    if (!conversation) return;
+
+    const config = useConfigStore.getState().config;
+    const activeProvider = config?.providers.find(
+      (p) => p.id === config.activeProviderId
+    );
+    const activeModel = config?.activeModel;
+
+    if (!activeProvider || !activeModel) {
+      setSummarizeError("请先在设置中配置 API");
+      return;
+    }
+
+    // 按选中顺序组装上下文
+    const parts: string[] = [];
+    for (const nodeId of batchSelectedIds) {
+      const node = conversation.nodes[nodeId];
+      if (!node) continue;
+      const roleLabel = node.role === "user" ? "用户" : "AI";
+      parts.push(`[${roleLabel}]\n${node.content}`);
+    }
+
+    const contextText = parts.join("\n\n");
+    const fullPrompt = `以下是一段对话记录：\n\n${contextText}\n\n---\n\n${summarizePrompt}`;
+
+    setIsSummarizing(true);
+    setSummarizeContent("");
+    setSummarizeError(null);
+
+    const controller = new AbortController();
+    summarizeAbortRef.current = controller;
+
+    let fullContent = "";
+
+    await streamChatCompletion({
+      apiUrl: activeProvider.apiUrl,
+      apiKey: activeProvider.apiKey,
+      model: activeModel,
+      messages: [{ role: "user", content: fullPrompt }],
+      modelConfig: activeProvider.modelConfig,
+      signal: controller.signal,
+      callbacks: {
+        onToken: (token) => {
+          fullContent += token;
+          setSummarizeContent(fullContent);
+        },
+        onDone: async (content) => {
+          // 创建为新的根节点
+          takeSnapshot(conversation);
+          const newNode = conversationService.createNode(
+            conversation.id,
+            "assistant",
+            content,
+            null
+          );
+          newNode.modelName = activeModel;
+          newNode.isPartial = false;
+          await addNodeAndSave(newNode);
+          setSelectedNodeId(newNode.id);
+
+          setIsSummarizing(false);
+          setShowSummarizeDialog(false);
+          useEditStore.getState().clearBatchSelection();
+        },
+        onError: (err) => {
+          setSummarizeError(err.message);
+          setIsSummarizing(false);
+        },
+      },
+    });
+  }, [conversation, batchSelectedIds, summarizePrompt, takeSnapshot, addNodeAndSave]);
+
   // 撤销
   const handleUndo = useCallback(async () => {
     if (!conversation) return;
@@ -633,7 +736,44 @@ function CanvasViewInner({
         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onBack}>
           <ArrowLeft className="h-4 w-4" />
         </Button>
-        <h3 className="text-sm font-medium truncate">{convName}</h3>
+        {isRenamingConv ? (
+          <input
+            type="text"
+            value={renameText}
+            onChange={(e) => setRenameText(e.target.value)}
+            className="text-sm font-medium bg-transparent outline-none border-b border-primary max-w-[200px]"
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                const trimmed = renameText.trim();
+                if (trimmed && trimmed !== convName) {
+                  renameConversation(projectId, conversationId, trimmed);
+                }
+                setIsRenamingConv(false);
+              } else if (e.key === "Escape") {
+                setIsRenamingConv(false);
+              }
+            }}
+            onBlur={() => {
+              const trimmed = renameText.trim();
+              if (trimmed && trimmed !== convName) {
+                renameConversation(projectId, conversationId, trimmed);
+              }
+              setIsRenamingConv(false);
+            }}
+          />
+        ) : (
+          <h3
+            className="text-sm font-medium truncate cursor-pointer hover:text-primary/80"
+            onDoubleClick={() => {
+              setRenameText(convName);
+              setIsRenamingConv(true);
+            }}
+            title="双击重命名"
+          >
+            {convName}
+          </h3>
+        )}
 
         {/* 批量模式指示 */}
         {isBatchMode && (
@@ -651,6 +791,7 @@ function CanvasViewInner({
           onBatchBuildTree={handleBatchBuildTree}
           onBatchCopyTree={handleBatchCopyTree}
           onBatchDelete={handleBatchDelete}
+          onBatchSummarize={handleBatchSummarize}
           batchCount={batchSelectedIds.length}
         />
 
@@ -728,6 +869,74 @@ function CanvasViewInner({
           />
         )}
       </div>
+
+      {/* 总结对话框 */}
+      <Dialog open={showSummarizeDialog} onOpenChange={(open) => {
+        if (!open && isSummarizing) {
+          summarizeAbortRef.current?.abort();
+          setIsSummarizing(false);
+        }
+        setShowSummarizeDialog(open);
+      }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>AI 总结</DialogTitle>
+            <DialogDescription>
+              将 {batchSelectedIds.length} 个选中节点的内容发送给 AI 进行总结，结果生成为新的根节点。
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <div>
+              <label className="text-sm font-medium">总结指令</label>
+              <textarea
+                value={summarizePrompt}
+                onChange={(e) => setSummarizePrompt(e.target.value)}
+                disabled={isSummarizing}
+                className="w-full mt-1.5 min-h-[80px] max-h-[150px] p-2.5 border rounded-lg bg-background text-sm resize-y outline-none focus:ring-2 focus:ring-ring"
+                placeholder="输入你希望 AI 如何总结这些内容..."
+              />
+            </div>
+
+            {/* 流式生成预览 */}
+            {isSummarizing && summarizeContent && (
+              <div className="rounded-lg border p-3 max-h-[200px] overflow-y-auto bg-green-50">
+                <div className="flex items-center gap-1.5 mb-2">
+                  <Loader2 className="h-3 w-3 animate-spin text-green-600" />
+                  <span className="text-xs text-green-600 font-medium">生成中...</span>
+                </div>
+                <MarkdownRenderer content={summarizeContent} streaming />
+              </div>
+            )}
+
+            {summarizeError && (
+              <p className="text-sm text-destructive">{summarizeError}</p>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                if (isSummarizing) {
+                  summarizeAbortRef.current?.abort();
+                  setIsSummarizing(false);
+                } else {
+                  setShowSummarizeDialog(false);
+                }
+              }}
+            >
+              {isSummarizing ? "中断" : "取消"}
+            </Button>
+            <Button
+              onClick={executeSummarize}
+              disabled={isSummarizing || !summarizePrompt.trim()}
+            >
+              开始总结
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
