@@ -7,6 +7,7 @@ import { useProjectStore } from "@/stores/project-store";
 import { conversationService, buildContext, streamChatCompletion } from "@/services";
 import { searchKnowledge } from "@/services/rag-service";
 import { useAttachments } from "@/hooks/useAttachments";
+import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
 import { Button } from "@/components/ui/button";
 import {
   ArrowLeft,
@@ -284,6 +285,13 @@ export function ChatView({
     [conversation, updateNodeAndSave, takeSnapshot]
   );
 
+  const handleEditSaved = useCallback((nodeId: string) => {
+    const currentConfig = useConfigStore.getState().config;
+    if (currentConfig?.autoGenerateOnEnter !== false) {
+      handleGenerate(nodeId);
+    }
+  }, [handleGenerate]);
+
   const togglePin = async (nodeId: string) => {
     const node = conversation.nodes[nodeId];
     if (node) await updateNodeAndSave(nodeId, { isPinned: !node.isPinned });
@@ -388,9 +396,15 @@ export function ChatView({
                 <ChatBubble
                   node={msg}
                   isSelected={msg.id === selectedNodeId}
+                  autoEdit={
+                    msg === messages[messages.length - 1] &&
+                    msg.role === "user" &&
+                    !msg.content
+                  }
                   onTogglePin={() => togglePin(msg.id)}
                   onToggleStar={() => toggleStar(msg.id)}
                   onEditContent={(newContent) => handleEditContent(msg.id, newContent)}
+                  onEditSaved={handleEditSaved}
                 />
               </div>
             );
@@ -404,9 +418,7 @@ export function ChatView({
                 <Loader2 className="h-3 w-3 animate-spin text-green-600" />
                 <span className="text-xs text-green-600">生成中...</span>
               </div>
-              <div className="whitespace-pre-wrap break-words text-foreground/90 leading-relaxed">
-                {streamingContent}
-              </div>
+              <MarkdownRenderer content={streamingContent} streaming />
             </div>
           )}
 
@@ -576,17 +588,21 @@ export function ChatView({
 interface ChatBubbleProps {
   node: ChatNode;
   isSelected: boolean;
+  autoEdit?: boolean;
   onTogglePin: () => void;
   onToggleStar: () => void;
   onEditContent: (newContent: string) => void;
+  onEditSaved?: (nodeId: string) => void;
 }
 
 function ChatBubble({
   node,
   isSelected,
+  autoEdit,
   onTogglePin,
   onToggleStar,
   onEditContent,
+  onEditSaved,
 }: ChatBubbleProps) {
   const isUser = node.role === "user";
   const [isEditing, setIsEditing] = useState(false);
@@ -606,12 +622,24 @@ function ChatBubble({
     }
   }, [isEditing]);
 
+  // 自动进入编辑模式（用于空的根节点）
+  useEffect(() => {
+    if (autoEdit && !isEditing) {
+      setEditText(node.content);
+      setIsEditing(true);
+    }
+  }, [autoEdit]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const saveEdit = useCallback(() => {
     if (editText !== node.content) {
       onEditContent(editText);
     }
     setIsEditing(false);
-  }, [editText, node.content, onEditContent]);
+    // 内容非空时才触发自动生成
+    if (editText.trim() && onEditSaved) {
+      onEditSaved(node.id);
+    }
+  }, [editText, node.content, node.id, onEditContent, onEditSaved]);
 
   const cancelEdit = useCallback(() => {
     setIsEditing(false);
@@ -750,9 +778,13 @@ function ChatBubble({
           </p>
         </div>
       ) : (
-        <div className="whitespace-pre-wrap break-words text-foreground/90 leading-relaxed">
-          {node.content || "(空消息)"}
-        </div>
+        node.role === "assistant" ? (
+          <MarkdownRenderer content={node.content} />
+        ) : (
+          <div className="whitespace-pre-wrap break-words text-foreground/90 leading-relaxed">
+            {node.content || "(空消息)"}
+          </div>
+        )
       )}
 
       {(node.isPinned || node.isStarred) && (

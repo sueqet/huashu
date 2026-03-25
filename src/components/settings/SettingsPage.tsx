@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { useConfigStore } from "@/stores/config-store";
+import { configService } from "@/services/config-service";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import {
   Plus,
   Trash2,
@@ -36,6 +38,12 @@ export function SettingsPage() {
       </div>
     );
   }
+
+  const handleAutoGenerateChange = async (checked: boolean) => {
+    const updatedConfig = { ...config, autoGenerateOnEnter: checked };
+    await configService.saveConfig(updatedConfig);
+    await loadConfig();
+  };
 
   return (
     <div className="flex-1 flex flex-col p-6 overflow-y-auto">
@@ -87,6 +95,23 @@ export function SettingsPage() {
             />
           ))
         )}
+      </div>
+
+      {/* 行为设置 */}
+      <div className="space-y-4 mt-8">
+        <h3 className="text-lg font-semibold">行为设置</h3>
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium">回车后自动生成回复</p>
+            <p className="text-xs text-muted-foreground">
+              编辑消息后按回车保存时，自动生成 AI 回复
+            </p>
+          </div>
+          <Switch
+            checked={config?.autoGenerateOnEnter !== false}
+            onCheckedChange={(checked) => handleAutoGenerateChange(checked)}
+          />
+        </div>
       </div>
     </div>
   );

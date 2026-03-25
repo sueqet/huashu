@@ -7,6 +7,7 @@ import { useProjectStore } from "@/stores/project-store";
 import { conversationService, buildContext, streamChatCompletion } from "@/services";
 import { searchKnowledge } from "@/services/rag-service";
 import { useAttachments } from "@/hooks/useAttachments";
+import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
 import { Button } from "@/components/ui/button";
 import {
   X,
@@ -269,6 +270,13 @@ export function ChatPanel({
     [conversation, updateNodeAndSave, takeSnapshot]
   );
 
+  const handleEditSaved = useCallback((nodeId: string) => {
+    const currentConfig = useConfigStore.getState().config;
+    if (currentConfig?.autoGenerateOnEnter !== false) {
+      handleGenerate(nodeId);
+    }
+  }, [handleGenerate]);
+
   const togglePin = async (nodeId: string) => {
     const node = conversation.nodes[nodeId];
     if (node) await updateNodeAndSave(nodeId, { isPinned: !node.isPinned });
@@ -310,10 +318,16 @@ export function ChatPanel({
             hasChildren={msg.childrenIds.length > 0}
             isCollapsed={collapsedIds.has(msg.id)}
             isEditMode={true}
+            autoEdit={
+              msg === messages[messages.length - 1] &&
+              msg.role === "user" &&
+              !msg.content
+            }
             onToggleCollapse={() => onToggleCollapse(msg.id)}
             onTogglePin={() => togglePin(msg.id)}
             onToggleStar={() => toggleStar(msg.id)}
             onEditContent={(newContent) => handleEditContent(msg.id, newContent)}
+            onEditSaved={handleEditSaved}
           />
         ))}
 
@@ -325,9 +339,7 @@ export function ChatPanel({
               <Loader2 className="h-3 w-3 animate-spin text-green-600" />
               <span className="text-xs text-green-600">生成中...</span>
             </div>
-            <div className="whitespace-pre-wrap break-words text-foreground/90 leading-relaxed">
-              {streamingContent}
-            </div>
+            <MarkdownRenderer content={streamingContent} streaming />
           </div>
         )}
 
@@ -494,10 +506,12 @@ interface MessageBubbleProps {
   hasChildren: boolean;
   isCollapsed: boolean;
   isEditMode: boolean;
+  autoEdit?: boolean;
   onToggleCollapse: () => void;
   onTogglePin: () => void;
   onToggleStar: () => void;
   onEditContent: (newContent: string) => void;
+  onEditSaved?: (nodeId: string) => void;
 }
 
 function MessageBubble({
@@ -506,10 +520,12 @@ function MessageBubble({
   hasChildren,
   isCollapsed,
   isEditMode,
+  autoEdit,
   onToggleCollapse,
   onTogglePin,
   onToggleStar,
   onEditContent,
+  onEditSaved,
 }: MessageBubbleProps) {
   const isUser = node.role === "user";
   const [isEditing, setIsEditing] = useState(false);
@@ -533,13 +549,25 @@ function MessageBubble({
     }
   }, [isEditing]);
 
+  // 自动进入编辑模式（用于空的根节点）
+  useEffect(() => {
+    if (autoEdit && !isEditing) {
+      setEditText(node.content);
+      setIsEditing(true);
+    }
+  }, [autoEdit]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // 保存编辑
   const saveEdit = useCallback(() => {
     if (editText !== node.content) {
       onEditContent(editText);
     }
     setIsEditing(false);
-  }, [editText, node.content, onEditContent]);
+    // 内容非空时才触发自动生成
+    if (editText.trim() && onEditSaved) {
+      onEditSaved(node.id);
+    }
+  }, [editText, node.content, node.id, onEditContent, onEditSaved]);
 
   // 取消编辑
   const cancelEdit = useCallback(() => {
@@ -697,9 +725,13 @@ function MessageBubble({
           </p>
         </div>
       ) : (
-        <div className="whitespace-pre-wrap break-words text-foreground/90 leading-relaxed">
-          {node.content || "(空消息)"}
-        </div>
+        node.role === "assistant" ? (
+          <MarkdownRenderer content={node.content} />
+        ) : (
+          <div className="whitespace-pre-wrap break-words text-foreground/90 leading-relaxed">
+            {node.content || "(空消息)"}
+          </div>
+        )
       )}
 
       {(node.isPinned || node.isStarred) && (

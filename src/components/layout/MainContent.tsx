@@ -5,6 +5,8 @@ import { SettingsPage } from "@/components/settings/SettingsPage";
 interface MainContentProps {
   currentView: string;
   selectedProjectId: string | null;
+  autoCreate?: boolean;
+  onAutoCreateDone?: () => void;
   onSelectProject: (projectId: string) => void;
   onBackToProjects: () => void;
   onOpenConversation: (projectId: string, convId: string) => void;
@@ -13,6 +15,8 @@ interface MainContentProps {
 export function MainContent({
   currentView,
   selectedProjectId,
+  autoCreate,
+  onAutoCreateDone,
   onSelectProject,
   onBackToProjects,
   onOpenConversation,
@@ -32,5 +36,5 @@ export function MainContent({
   }
 
   // 默认显示项目列表
-  return <ProjectList onSelectProject={onSelectProject} />;
+  return <ProjectList onSelectProject={onSelectProject} autoCreate={autoCreate} onAutoCreateDone={onAutoCreateDone} />;
 }

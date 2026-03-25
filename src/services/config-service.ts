@@ -11,6 +11,7 @@ function createDefaultConfig(): AppConfig {
     providers: [],
     activeProviderId: undefined,
     activeModel: undefined,
+    autoGenerateOnEnter: true,
   };
 }
 

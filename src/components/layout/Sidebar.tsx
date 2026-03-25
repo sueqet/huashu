@@ -6,7 +6,6 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
-  MessageSquare,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -51,15 +50,6 @@ export function Sidebar({ onNavigate, currentView }: SidebarProps) {
         >
           <FolderOpen className="h-4 w-4" />
           {!collapsed && <span>项目列表</span>}
-        </Button>
-
-        <Button
-          variant={currentView === "conversations" ? "secondary" : "ghost"}
-          className={`w-full ${collapsed ? "justify-center px-0" : "justify-start"}`}
-          onClick={() => onNavigate("conversations")}
-        >
-          <MessageSquare className="h-4 w-4" />
-          {!collapsed && <span>对话</span>}
         </Button>
 
         <Button

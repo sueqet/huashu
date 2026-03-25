@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useProjectStore } from "@/stores/project-store";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,11 +17,13 @@ import type { Project } from "@/types";
 
 interface ProjectListProps {
   onSelectProject: (projectId: string) => void;
+  autoCreate?: boolean;
+  onAutoCreateDone?: () => void;
 }
 
 type SortMode = "updatedAt" | "name";
 
-export function ProjectList({ onSelectProject }: ProjectListProps) {
+export function ProjectList({ onSelectProject, autoCreate, onAutoCreateDone }: ProjectListProps) {
   const { projects, createProject, deleteProject, toggleArchive, loading } =
     useProjectStore();
   const [showArchived, setShowArchived] = useState(false);
@@ -31,6 +33,14 @@ export function ProjectList({ onSelectProject }: ProjectListProps) {
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 从侧边栏点击"新建项目"时自动打开创建表单
+  useEffect(() => {
+    if (autoCreate) {
+      setIsCreating(true);
+      onAutoCreateDone?.();
+    }
+  }, [autoCreate, onAutoCreateDone]);
 
   const filteredProjects = projects.filter(
     (p) => p.isArchived === showArchived

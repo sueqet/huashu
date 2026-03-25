@@ -4,19 +4,22 @@ import { MainContent } from "@/components/layout/MainContent";
 import { CanvasView } from "@/components/canvas/CanvasView";
 import { fileService } from "@/services";
 import { useProjectStore } from "@/stores/project-store";
+import { useConfigStore } from "@/stores/config-store";
 
 function App() {
   const [currentView, setCurrentView] = useState("projects");
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [openConvId, setOpenConvId] = useState<string | null>(null);
   const [initialized, setInitialized] = useState(false);
+  const [autoCreate, setAutoCreate] = useState(false);
   const loadProjects = useProjectStore((s) => s.loadProjects);
+  const loadConfig = useConfigStore((s) => s.loadConfig);
 
   useEffect(() => {
     async function init() {
       try {
         await fileService.initAppDataDir();
-        await loadProjects();
+        await Promise.all([loadProjects(), loadConfig()]);
       } catch (err) {
         console.error("初始化失败:", err);
       } finally {
@@ -24,16 +27,23 @@ function App() {
       }
     }
     init();
-  }, [loadProjects]);
+  }, [loadProjects, loadConfig]);
 
   const handleNavigate = (view: string) => {
-    if (view === "projects" || view === "new-project") {
+    if (view === "new-project") {
       setCurrentView("projects");
       setSelectedProjectId(null);
       setOpenConvId(null);
+      setAutoCreate(true);
+    } else if (view === "projects") {
+      setCurrentView("projects");
+      setSelectedProjectId(null);
+      setOpenConvId(null);
+      setAutoCreate(false);
     } else {
       setCurrentView(view);
       setOpenConvId(null);
+      setAutoCreate(false);
     }
   };
 
@@ -89,6 +99,8 @@ function App() {
       <MainContent
         currentView={currentView}
         selectedProjectId={selectedProjectId}
+        autoCreate={autoCreate}
+        onAutoCreateDone={() => setAutoCreate(false)}
         onSelectProject={handleSelectProject}
         onBackToProjects={handleBackToProjects}
         onOpenConversation={handleOpenConversation}

@@ -52,4 +52,6 @@ export interface AppConfig {
   activeProviderId?: string;
   /** 当前激活的模型名称 */
   activeModel?: string;
+  /** 编辑保存后是否自动生成 AI 回复 */
+  autoGenerateOnEnter?: boolean;
 }
