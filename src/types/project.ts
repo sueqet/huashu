@@ -1,3 +1,5 @@
+import type { StoryConfig, AgentConfig } from "./story";
+
 /** 项目 - 独立工作空间 */
 export interface Project {
   /** 数据结构版本号 */
@@ -18,4 +20,10 @@ export interface Project {
   isArchived: boolean;
   /** 是否启用 RAG 检索 */
   ragEnabled: boolean;
+  /** 项目模式 */
+  mode: "chat" | "story" | "agent";
+  /** 故事配置（仅 mode='story'） */
+  storyConfig?: StoryConfig;
+  /** Agent 配置（预留，仅 mode='agent'） */
+  agentConfig?: AgentConfig;
 }

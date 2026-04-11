@@ -69,6 +69,7 @@ export const projectService = {
       updatedAt: now,
       isArchived: false,
       ragEnabled: false,
+      mode: "chat",
     };
 
     // 创建项目目录结构
