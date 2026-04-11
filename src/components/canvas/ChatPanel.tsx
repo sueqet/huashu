@@ -164,7 +164,7 @@ export function ChatPanel({
 
     // 获取最新节点数据用于构建上下文
     const freshNodes = useConversationStore.getState().conversation!.nodes;
-    const context = buildContext({
+    const context = await buildContext({
       nodes: freshNodes,
       currentNodeId: targetNodeId,
       projectDescription: project?.description,
