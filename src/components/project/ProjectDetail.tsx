@@ -132,6 +132,19 @@ export function ProjectDetail({
     const conv = await createConversation(projectId, newConvName.trim());
     setNewConvName("");
     setIsCreatingConv(false);
+
+    // 故事模式：自动创建开场白节点
+    if (project.mode === "story" && project.storyConfig?.openingMessage) {
+      const { conversationService } = await import("@/services");
+      const openingNode = conversationService.createNode(
+        conv.id,
+        "assistant",
+        project.storyConfig.openingMessage,
+        null
+      );
+      await useConversationStore.getState().addNodeAndSave(openingNode);
+    }
+
     onOpenConversation(projectId, conv.id);
   };
 
@@ -347,7 +360,7 @@ export function ProjectDetail({
               type="text"
               value={newConvName}
               onChange={(e) => setNewConvName(e.target.value)}
-              placeholder="输入对话名称..."
+              placeholder={project.mode === "story" ? "章节名称..." : "输入对话名称..."}
               className="flex-1 bg-transparent outline-none text-sm"
               autoFocus
               onKeyDown={(e) => {
@@ -360,7 +373,7 @@ export function ProjectDetail({
               onClick={handleCreateConv}
               disabled={!newConvName.trim()}
             >
-              创建
+              {project.mode === "story" ? "创建章节" : "创建"}
             </Button>
             <Button
               size="sm"
