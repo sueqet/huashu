@@ -11,6 +11,8 @@ import {
   Clock,
   SortAsc,
   Upload,
+  BookOpen,
+  MessageSquare,
 } from "lucide-react";
 import { exportService } from "@/services/export-service";
 import type { Project } from "@/types";
@@ -32,6 +34,7 @@ export function ProjectList({ onSelectProject, autoCreate, onAutoCreateDone }: P
   const [newName, setNewName] = useState("");
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  const [createMode, setCreateMode] = useState<"chat" | "story">("chat");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 从侧边栏点击"新建项目"时自动打开创建表单
@@ -53,10 +56,24 @@ export function ProjectList({ onSelectProject, autoCreate, onAutoCreateDone }: P
 
   const handleCreate = async () => {
     if (!newName.trim()) return;
-    const project = await createProject(newName.trim());
-    setNewName("");
-    setIsCreating(false);
-    onSelectProject(project.id);
+    if (createMode === "story") {
+      const project = await createProject(newName.trim(), undefined, "story", {
+        worldSetting: "",
+        rules: "",
+        characters: [],
+        openingMessage: "",
+        chapterSummaries: [],
+      });
+      setNewName("");
+      setIsCreating(false);
+      setCreateMode("chat");
+      onSelectProject(project.id);
+    } else {
+      const project = await createProject(newName.trim());
+      setNewName("");
+      setIsCreating(false);
+      onSelectProject(project.id);
+    }
   };
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -170,29 +187,57 @@ export function ProjectList({ onSelectProject, autoCreate, onAutoCreateDone }: P
 
       {/* 新建项目输入 */}
       {isCreating && (
-        <div className="mb-4 flex items-center gap-2 p-3 border rounded-lg bg-card">
-          <input
-            type="text"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            placeholder="输入项目名称..."
-            className="flex-1 bg-transparent outline-none text-sm"
-            autoFocus
-            onKeyDown={(e) => {
-              if (e.key === "Enter") handleCreate();
-              if (e.key === "Escape") setIsCreating(false);
-            }}
-          />
-          <Button size="sm" onClick={handleCreate} disabled={!newName.trim()}>
-            创建
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => setIsCreating(false)}
-          >
-            取消
-          </Button>
+        <div className="mb-4 p-3 border rounded-lg bg-card space-y-3">
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="输入项目名称..."
+              className="flex-1 bg-transparent outline-none text-sm"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleCreate();
+                if (e.key === "Escape") setIsCreating(false);
+              }}
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">项目类型：</span>
+            <Button
+              size="sm"
+              variant={createMode === "chat" ? "default" : "outline"}
+              className="h-7 text-xs"
+              onClick={() => setCreateMode("chat")}
+            >
+              <MessageSquare className="h-3 w-3 mr-1" />
+              对话模式
+            </Button>
+            <Button
+              size="sm"
+              variant={createMode === "story" ? "default" : "outline"}
+              className="h-7 text-xs"
+              onClick={() => setCreateMode("story")}
+            >
+              <BookOpen className="h-3 w-3 mr-1" />
+              故事模式
+            </Button>
+          </div>
+          <div className="flex gap-2 justify-end">
+            <Button size="sm" onClick={handleCreate} disabled={!newName.trim()}>
+              创建
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setIsCreating(false);
+                setCreateMode("chat");
+              }}
+            >
+              取消
+            </Button>
+          </div>
         </div>
       )}
 
@@ -252,7 +297,14 @@ function ProjectCard({
     >
       <FolderOpen className="h-5 w-5 text-muted-foreground shrink-0" />
       <div className="flex-1 min-w-0">
-        <h3 className="font-medium text-sm truncate">{project.name}</h3>
+        <div className="flex items-center">
+          <h3 className="font-medium text-sm truncate">{project.name}</h3>
+          {project.mode === "story" && (
+            <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded ml-1 shrink-0">
+              故事
+            </span>
+          )}
+        </div>
         {project.description && (
           <p className="text-xs text-muted-foreground truncate mt-0.5">
             {project.description}
