@@ -15,6 +15,7 @@ import {
   MessageSquare,
 } from "lucide-react";
 import { exportService } from "@/services/export-service";
+import { useConfirm } from "@/hooks/useConfirm";
 import type { Project } from "@/types";
 
 interface ProjectListProps {
@@ -37,6 +38,7 @@ export function ProjectList({ onSelectProject, autoCreate, onAutoCreateDone }: P
   const [createMode, setCreateMode] = useState<"chat" | "story">("chat");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const storyInputRef = useRef<HTMLInputElement>(null);
+  const { confirm, ConfirmDialog } = useConfirm();
 
   // 从侧边栏点击"新建项目"时自动打开创建表单
   useEffect(() => {
@@ -133,7 +135,7 @@ export function ProjectList({ onSelectProject, autoCreate, onAutoCreateDone }: P
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("确定要删除此项目吗？此操作不可撤销。")) return;
+    if (!await confirm({ title: "确定要删除此项目吗？此操作不可撤销。" })) return;
     await deleteProject(id);
     setMenuOpenId(null);
   };
@@ -314,6 +316,7 @@ export function ProjectList({ onSelectProject, autoCreate, onAutoCreateDone }: P
           ))
         )}
       </div>
+      {ConfirmDialog}
     </div>
   );
 }

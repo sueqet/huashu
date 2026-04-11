@@ -558,13 +558,13 @@ function MessageBubble({
   }, [autoEdit]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 保存编辑
-  const saveEdit = useCallback(() => {
+  const saveEdit = useCallback((source: 'enter' | 'blur' = 'blur') => {
     if (editText !== node.content) {
       onEditContent(editText);
     }
     setIsEditing(false);
-    // 内容非空时才触发自动生成
-    if (editText.trim() && onEditSaved) {
+    // 仅在 Enter 保存时触发自动生成，失焦不触发
+    if (source === 'enter' && editText.trim() && onEditSaved) {
       onEditSaved(node.id);
     }
   }, [editText, node.content, node.id, onEditContent, onEditSaved]);
@@ -580,7 +580,7 @@ function MessageBubble({
     (e: React.KeyboardEvent) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
-        saveEdit();
+        saveEdit('enter');
       } else if (e.key === "Escape") {
         e.preventDefault();
         cancelEdit();
@@ -717,7 +717,7 @@ function MessageBubble({
             value={editText}
             onChange={(e) => setEditText(e.target.value)}
             onKeyDown={handleEditKeyDown}
-            onBlur={saveEdit}
+            onBlur={() => saveEdit('blur')}
             className="w-full min-h-[60px] max-h-[200px] p-2 border rounded bg-background text-sm resize-y outline-none focus:ring-1 focus:ring-ring"
           />
           <p className="text-[10px] text-muted-foreground">

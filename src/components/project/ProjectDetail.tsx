@@ -16,6 +16,7 @@ import {
   BookOpen,
 } from "lucide-react";
 import { exportService } from "@/services/export-service";
+import { useConfirm } from "@/hooks/useConfirm";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeFile } from "@tauri-apps/plugin-fs";
 
@@ -50,6 +51,7 @@ export function ProjectDetail({
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [renamingConvId, setRenamingConvId] = useState<string | null>(null);
   const [renameConvText, setRenameConvText] = useState("");
+  const { confirm, ConfirmDialog } = useConfirm();
 
   useEffect(() => {
     loadConversationList(projectId);
@@ -134,12 +136,40 @@ export function ProjectDetail({
     setIsCreatingConv(false);
 
     // 故事模式：自动创建开场白节点
-    if (project.mode === "story" && project.storyConfig?.openingMessage) {
+    if (project.mode === "story" && project.storyConfig) {
+      // 先加载对话到 store，否则 addNodeAndSave 的 guard 会因 state.conversation 为 null 而跳过
+      await useConversationStore.getState().loadConversation(projectId, conv.id);
       const { conversationService } = await import("@/services");
+      const openingContent = project.storyConfig.openingMessage
+        || "故事开始了。请开始你的叙述……";
       const openingNode = conversationService.createNode(
         conv.id,
         "assistant",
-        project.storyConfig.openingMessage,
+        openingContent,
+        null
+      );
+      await useConversationStore.getState().addNodeAndSave(openingNode);
+    }
+
+    onOpenConversation(projectId, conv.id);
+  };
+
+  // 故事模式：一键开始故事
+  const handleStartStory = async () => {
+    const chapterName = "第1章";
+    const conv = await createConversation(projectId, chapterName);
+
+    // 自动创建开场白节点（即使 openingMessage 为空也创建占位节点）
+    if (project.storyConfig) {
+      // 先加载对话到 store，否则 addNodeAndSave 的 guard 会因 state.conversation 为 null 而跳过
+      await useConversationStore.getState().loadConversation(projectId, conv.id);
+      const { conversationService } = await import("@/services");
+      const openingContent = project.storyConfig.openingMessage
+        || "故事开始了。请开始你的叙述……";
+      const openingNode = conversationService.createNode(
+        conv.id,
+        "assistant",
+        openingContent,
         null
       );
       await useConversationStore.getState().addNodeAndSave(openingNode);
@@ -149,7 +179,7 @@ export function ProjectDetail({
   };
 
   const handleDeleteConv = async (convId: string) => {
-    if (!confirm("确定要删除此对话吗？此操作不可撤销。")) return;
+    if (!await confirm({ title: "确定要删除此对话吗？此操作不可撤销。" })) return;
     await deleteConversation(projectId, convId);
   };
 
@@ -252,7 +282,9 @@ export function ProjectDetail({
 
       {/* 故事模式：显示 StorySetupPanel */}
       {project.mode === "story" && project.storyConfig && (
-        <StorySetupPanel projectId={projectId} storyConfig={project.storyConfig} />
+        <div className="max-h-[40vh] overflow-y-auto shrink-0 mb-4">
+          <StorySetupPanel projectId={projectId} storyConfig={project.storyConfig} />
+        </div>
       )}
 
       {/* 对话模式：项目描述 */}
@@ -317,8 +349,8 @@ export function ProjectDetail({
               variant="outline"
               size="sm"
               className="text-destructive border-destructive/30 hover:bg-destructive/10"
-              onClick={() => {
-                if (confirm("确定要关闭 RAG 知识库吗？已有的知识库数据不会被删除，再次启用后可继续使用。")) {
+              onClick={async () => {
+                if (await confirm({ title: "确定要关闭 RAG 知识库吗？", description: "已有的知识库数据不会被删除，再次启用后可继续使用。" })) {
                   updateProject(projectId, { ragEnabled: false });
                 }
               }}
@@ -348,9 +380,20 @@ export function ProjectDetail({
           <h3 className="text-lg font-medium">
             {project.mode === "story" ? "章节列表" : "对话列表"}
           </h3>
-          <Button size="sm" onClick={() => setIsCreatingConv(true)}>
+          <Button size="sm" onClick={() => {
+            if (project.mode === "story" && conversationList.length === 0) {
+              handleStartStory();
+            } else {
+              setIsCreatingConv(true);
+              if (project.mode === "story") {
+                setNewConvName(`第${conversationList.length + 1}章`);
+              }
+            }
+          }}>
             <Plus className="h-4 w-4 mr-1" />
-            {project.mode === "story" ? "新建章节" : "新建对话"}
+            {project.mode === "story"
+              ? conversationList.length === 0 ? "开始故事" : "新建章节"
+              : "新建对话"}
           </Button>
         </div>
 
@@ -474,6 +517,7 @@ export function ProjectDetail({
           )}
         </div>
       </div>
+      {ConfirmDialog}
     </div>
   );
 }

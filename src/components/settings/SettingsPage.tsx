@@ -12,6 +12,7 @@ import {
   ChevronDown,
   ChevronRight,
 } from "lucide-react";
+import { useConfirm } from "@/hooks/useConfirm";
 import type { ApiProvider, ModelConfig, EmbeddingConfig } from "@/types";
 
 export function SettingsPage() {
@@ -26,6 +27,7 @@ export function SettingsPage() {
 
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [isAdding, setIsAdding] = useState(false);
+  const { confirm, ConfirmDialog } = useConfirm();
 
   useEffect(() => {
     loadConfig();
@@ -87,8 +89,8 @@ export function SettingsPage() {
               }
               onSetActive={(model) => setActiveProvider(provider.id, model)}
               onUpdate={(updates) => updateProvider(provider.id, updates)}
-              onDelete={() => {
-                if (confirm(`确定要删除 ${provider.name} 的配置吗？`)) {
+              onDelete={async () => {
+                if (await confirm({ title: `确定要删除 ${provider.name} 的配置吗？` })) {
                   removeProvider(provider.id);
                 }
               }}
@@ -113,6 +115,7 @@ export function SettingsPage() {
           />
         </div>
       </div>
+      {ConfirmDialog}
     </div>
   );
 }

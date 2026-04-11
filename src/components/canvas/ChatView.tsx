@@ -227,6 +227,10 @@ export function ChatView({
     }
   }, [storyConfig, activeProvider, activeModel, project, selectedNodeId, onSelectNode]);
 
+  // 保持 chapterSwitch ref 同步，供 handleGenerate 的 onDone 回调使用
+  const chapterSwitchRef = useRef(handleChapterSwitch);
+  chapterSwitchRef.current = handleChapterSwitch;
+
   // AI 生成回复（接受可选的 overrideNodeId）
   const handleGenerate = useCallback(async (overrideNodeId?: string) => {
     if (!activeProvider || !activeModel) {
@@ -234,6 +238,7 @@ export function ChatView({
       return;
     }
 
+    // 使用 overrideNodeId 或从闭包捕获的 selectedNodeId（调用时已确定）
     const targetNodeId = overrideNodeId || selectedNodeId;
 
     // 从 store 获取最新的 conversation（避免闭包中的旧值）
@@ -244,133 +249,145 @@ export function ChatView({
     setStreamingContent("");
     setError(null);
 
-    const aiNode = conversationService.createNode(
-      latestConv.id,
-      "assistant",
-      "",
-      targetNodeId
-    );
-    aiNode.isPartial = true;
-    aiNode.isUserEdited = false;
-    aiNode.modelName = activeModel;
-    setGeneratingNodeId(aiNode.id);
-    await addNodeAndSave(aiNode);
-    onSelectNode(aiNode.id);
-
-    // RAG 检索
-    let ragContext: string | undefined;
-    if (project?.ragEnabled && activeProvider.embedding) {
-      try {
-        // 再次获取最新状态（addNodeAndSave 后又更新了）
-        const freshConv = useConversationStore.getState().conversation!;
-        const targetNode = freshConv.nodes[targetNodeId];
-        if (targetNode?.content) {
-          const ragResults = await searchKnowledge(
-            freshConv.projectId,
-            targetNode.content,
-            activeProvider.apiUrl,
-            activeProvider.apiKey,
-            activeProvider.embedding.model,
-            5
-          );
-          if (ragResults.length > 0) {
-            ragContext = ragResults
-              .map(
-                (r, i) =>
-                  `[参考${i + 1}] (相似度: ${(r.score * 100).toFixed(1)}%)\n${r.chunk.content}`
-              )
-              .join("\n\n");
-          }
-        }
-      } catch (err) {
-        console.warn("RAG 检索失败:", err);
-      }
-    }
-
-    // 获取最新节点数据用于构建上下文
-    const freshNodes = useConversationStore.getState().conversation!.nodes;
-    const context = await buildContext({
-      nodes: freshNodes,
-      currentNodeId: targetNodeId,
-      projectDescription: project?.description,
-      ragContext,
-      maxTokens: activeProvider.maxContextTokens,
-      model: activeModel,
-      storyConfig: isStoryMode ? storyConfig : undefined,
-      storyRagContext: undefined, // Will be populated by RAG for story mode later
-    });
-
+    // 立即创建 AbortController 并赋值，使停止按钮尽早生效
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
-    let fullContent = "";
+    try {
+      const aiNode = conversationService.createNode(
+        latestConv.id,
+        "assistant",
+        "",
+        targetNodeId
+      );
+      aiNode.isPartial = true;
+      aiNode.isUserEdited = false;
+      aiNode.modelName = activeModel;
+      setGeneratingNodeId(aiNode.id);
+      await addNodeAndSave(aiNode);
+      onSelectNode(aiNode.id);
 
-    await streamChatCompletion({
-      apiUrl: activeProvider.apiUrl,
-      apiKey: activeProvider.apiKey,
-      model: activeModel,
-      messages: context.messages,
-      modelConfig: activeProvider.modelConfig,
-      signal: controller.signal,
-      callbacks: {
-        onToken: (token) => {
-          fullContent += token;
-          setStreamingContent(fullContent);
-        },
-        onDone: async (content) => {
-          await updateNodeAndSave(aiNode.id, {
-            content,
-            isPartial: false,
-          });
-          setStreamingContent("");
-          setGeneratingNodeId(null);
-          setIsGenerating(false);
-          abortControllerRef.current = null;
+      // 从 store 读取最新的 project 数据（避免闭包中旧的 project 引用）
+      const freshProject = useProjectStore.getState().projects.find(
+        (p) => p.id === latestConv.projectId
+      );
 
-          // 故事模式：检查是否需要切换章节
-          if (isStoryMode && storyConfig && activeProvider?.maxContextTokens) {
-            const freshConv = useConversationStore.getState().conversation;
-            if (freshConv) {
-              const chain = traceMessages(freshConv.nodes, aiNode.id);
-              const totalTokens = countMessagesTokens(
-                chain.map((n) => ({ role: n.role, content: n.content })),
-                activeModel || "gpt-4"
-              );
-              const threshold = activeProvider.maxContextTokens * 0.5;
-              if (totalTokens > threshold) {
-                // 延迟执行章节切换，让 UI 先更新
-                setTimeout(() => handleChapterSwitch(), 500);
-              }
+      // RAG 检索
+      let ragContext: string | undefined;
+      if (freshProject?.ragEnabled && activeProvider.embedding) {
+        try {
+          // 再次获取最新状态（addNodeAndSave 后又更新了）
+          const freshConv = useConversationStore.getState().conversation!;
+          const targetNode = freshConv.nodes[targetNodeId];
+          if (targetNode?.content) {
+            const ragResults = await searchKnowledge(
+              freshConv.projectId,
+              targetNode.content,
+              activeProvider.apiUrl,
+              activeProvider.apiKey,
+              activeProvider.embedding.model,
+              5
+            );
+            if (ragResults.length > 0) {
+              ragContext = ragResults
+                .map(
+                  (r, i) =>
+                    `[参考${i + 1}] (相似度: ${(r.score * 100).toFixed(1)}%)\n${r.chunk.content}`
+                )
+                .join("\n\n");
             }
           }
-        },
-        onError: async (err) => {
-          setError(err.message);
-          if (fullContent) {
+        } catch (err) {
+          console.warn("RAG 检索失败:", err);
+        }
+      }
+
+      // 获取最新节点数据用于构建上下文
+      const freshNodes = useConversationStore.getState().conversation!.nodes;
+      // 获取最新的 storyConfig
+      const freshIsStoryMode = freshProject?.mode === "story";
+      const freshStoryConfig = freshProject?.storyConfig;
+
+      const context = await buildContext({
+        nodes: freshNodes,
+        currentNodeId: targetNodeId,
+        projectDescription: freshProject?.description,
+        ragContext,
+        maxTokens: activeProvider.maxContextTokens,
+        model: activeModel,
+        storyConfig: freshIsStoryMode ? freshStoryConfig : undefined,
+        storyRagContext: undefined, // Will be populated by RAG for story mode later
+      });
+
+      let fullContent = "";
+
+      await streamChatCompletion({
+        apiUrl: activeProvider.apiUrl,
+        apiKey: activeProvider.apiKey,
+        model: activeModel,
+        messages: context.messages,
+        modelConfig: activeProvider.modelConfig,
+        signal: controller.signal,
+        callbacks: {
+          onToken: (token) => {
+            fullContent += token;
+            setStreamingContent(fullContent);
+          },
+          onDone: async (content) => {
             await updateNodeAndSave(aiNode.id, {
-              content: fullContent,
-              isPartial: true,
+              content,
+              isPartial: false,
             });
-          }
-          setStreamingContent("");
-          setGeneratingNodeId(null);
-          setIsGenerating(false);
-          abortControllerRef.current = null;
+            setStreamingContent("");
+            setGeneratingNodeId(null);
+            setIsGenerating(false);
+            abortControllerRef.current = null;
+
+            // 故事模式：检查是否需要切换章节
+            if (freshIsStoryMode && freshStoryConfig && activeProvider?.maxContextTokens) {
+              const latestConv2 = useConversationStore.getState().conversation;
+              if (latestConv2) {
+                const chain = traceMessages(latestConv2.nodes, aiNode.id);
+                const totalTokens = countMessagesTokens(
+                  chain.map((n) => ({ role: n.role, content: n.content })),
+                  activeModel || "gpt-4"
+                );
+                const threshold = activeProvider.maxContextTokens * 0.5;
+                if (totalTokens > threshold) {
+                  // 延迟执行章节切换，让 UI 先更新
+                  setTimeout(() => chapterSwitchRef.current(), 500);
+                }
+              }
+            }
+          },
+          onError: async (err) => {
+            setError(err.message);
+            if (fullContent) {
+              await updateNodeAndSave(aiNode.id, {
+                content: fullContent,
+                isPartial: true,
+              });
+            }
+            setStreamingContent("");
+            setGeneratingNodeId(null);
+            setIsGenerating(false);
+            abortControllerRef.current = null;
+          },
         },
-      },
-    });
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setStreamingContent("");
+      setGeneratingNodeId(null);
+      setIsGenerating(false);
+      abortControllerRef.current = null;
+    }
   }, [
     activeProvider,
     activeModel,
-    conversation,
-    selectedNodeId,
-    project,
     addNodeAndSave,
     updateNodeAndSave,
     onSelectNode,
-    isStoryMode,
-    storyConfig,
-    handleChapterSwitch,
   ]);
 
   // 发送消息（自动触发 AI 生成）
@@ -788,13 +805,13 @@ function ChatBubble({
     }
   }, [autoEdit]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const saveEdit = useCallback(() => {
+  const saveEdit = useCallback((source: 'enter' | 'blur' = 'blur') => {
     if (editText !== node.content) {
       onEditContent(editText);
     }
     setIsEditing(false);
-    // 内容非空时才触发自动生成
-    if (editText.trim() && onEditSaved) {
+    // 仅在 Enter 保存时触发自动生成，失焦不触发
+    if (source === 'enter' && editText.trim() && onEditSaved) {
       onEditSaved(node.id);
     }
   }, [editText, node.content, node.id, onEditContent, onEditSaved]);
@@ -808,7 +825,7 @@ function ChatBubble({
     (e: React.KeyboardEvent) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
-        saveEdit();
+        saveEdit('enter');
       } else if (e.key === "Escape") {
         e.preventDefault();
         cancelEdit();
@@ -928,7 +945,7 @@ function ChatBubble({
             value={editText}
             onChange={(e) => setEditText(e.target.value)}
             onKeyDown={handleEditKeyDown}
-            onBlur={saveEdit}
+            onBlur={() => saveEdit('blur')}
             className="w-full min-h-[80px] max-h-[300px] p-3 border rounded-lg bg-background text-sm resize-y outline-none focus:ring-1 focus:ring-ring"
           />
           <p className="text-[10px] text-muted-foreground">
