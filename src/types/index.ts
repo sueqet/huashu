@@ -8,3 +8,12 @@ export type {
   ModelConfig,
   EmbeddingConfig,
 } from "./config";
+export type {
+  StoryConfig,
+  StoryCharacter,
+  ChapterSummary,
+  TemplateMeta,
+  StoryTemplateFile,
+  AgentConfig,
+  AgentTool,
+} from "./story";

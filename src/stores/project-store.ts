@@ -12,11 +12,11 @@ interface ProjectState {
   /** 从文件系统加载所有项目 */
   loadProjects: () => Promise<void>;
   /** 创建新项目 */
-  createProject: (name: string, description?: string) => Promise<Project>;
+  createProject: (name: string, description?: string, mode?: "chat" | "story" | "agent", storyConfig?: import("@/types").StoryConfig) => Promise<Project>;
   /** 更新项目 */
   updateProject: (
     id: string,
-    updates: Partial<Pick<Project, "name" | "description" | "isArchived" | "ragEnabled">>
+    updates: Partial<Pick<Project, "name" | "description" | "isArchived" | "ragEnabled" | "storyConfig">>
   ) => Promise<void>;
   /** 删除项目 */
   deleteProject: (id: string) => Promise<void>;
@@ -45,8 +45,8 @@ export const useProjectStore = create<ProjectState>()(
       }
     },
 
-    createProject: async (name, description) => {
-      const project = await projectService.createProject(name, description);
+    createProject: async (name, description, mode, storyConfig) => {
+      const project = await projectService.createProject(name, description, mode, storyConfig);
       set((state) => {
         state.projects.unshift(project);
       });

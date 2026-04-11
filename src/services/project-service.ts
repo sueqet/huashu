@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
-import type { Project } from "@/types";
+import type { Project, StoryConfig } from "@/types";
 import { fileService } from "./file-service";
 
 const CURRENT_SCHEMA_VERSION = 1;
@@ -10,6 +10,14 @@ function projectDir(projectId: string): string {
 
 function metaPath(projectId: string): string {
   return `${projectDir(projectId)}/meta.json`;
+}
+
+/** 为旧项目补全 mode 字段 */
+function migrateProject(project: Project): Project {
+  if (!project.mode) {
+    project.mode = "chat";
+  }
+  return project;
 }
 
 /**
@@ -26,9 +34,10 @@ export const projectService = {
     for (const entry of entries) {
       if (entry.isDirectory && entry.name) {
         try {
-          const project = await fileService.readJSON<Project>(
+          let project = await fileService.readJSON<Project>(
             metaPath(entry.name)
           );
+          project = migrateProject(project);
           projects.push(project);
         } catch {
           // 跳过无法读取的项目目录
@@ -46,7 +55,8 @@ export const projectService = {
    * 获取单个项目
    */
   async getProject(projectId: string): Promise<Project> {
-    return fileService.readJSON<Project>(metaPath(projectId));
+    const project = await fileService.readJSON<Project>(metaPath(projectId));
+    return migrateProject(project);
   },
 
   /**
@@ -54,7 +64,9 @@ export const projectService = {
    */
   async createProject(
     name: string,
-    description?: string
+    description?: string,
+    mode: "chat" | "story" | "agent" = "chat",
+    storyConfig?: StoryConfig
   ): Promise<Project> {
     const id = uuidv4();
     const now = Date.now();
@@ -68,7 +80,9 @@ export const projectService = {
       createdAt: now,
       updatedAt: now,
       isArchived: false,
-      ragEnabled: false,
+      ragEnabled: mode === "story", // 故事模式自动启用 RAG
+      mode,
+      storyConfig,
     };
 
     // 创建项目目录结构
@@ -88,7 +102,7 @@ export const projectService = {
    */
   async updateProject(
     projectId: string,
-    updates: Partial<Pick<Project, "name" | "description" | "conversationOrder" | "isArchived" | "ragEnabled">>
+    updates: Partial<Pick<Project, "name" | "description" | "conversationOrder" | "isArchived" | "ragEnabled" | "storyConfig">>
   ): Promise<Project> {
     const project = await this.getProject(projectId);
     const updated: Project = {

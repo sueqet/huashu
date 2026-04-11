@@ -19,6 +19,7 @@ import {
   Database,
   RefreshCw,
 } from "lucide-react";
+import { useConfirm } from "@/hooks/useConfirm";
 
 interface KnowledgeBasePanelProps {
   projectId: string;
@@ -31,6 +32,7 @@ export function KnowledgeBasePanel({ projectId }: KnowledgeBasePanelProps) {
   const [processing, setProcessing] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { confirm, ConfirmDialog } = useConfirm();
 
   const activeProvider = config?.providers.find(
     (p) => p.id === config.activeProviderId
@@ -100,7 +102,7 @@ export function KnowledgeBasePanel({ projectId }: KnowledgeBasePanelProps) {
   };
 
   const handleRemoveDoc = async (docId: string, docName: string) => {
-    if (!confirm(`确定要删除文档 "${docName}" 吗？相关的向量索引也会被删除。`)) return;
+    if (!await confirm({ title: `确定要删除文档 "${docName}" 吗？`, description: "相关的向量索引也会被删除。" })) return;
     try {
       await removeDocument(projectId, docId);
       await loadKB();
@@ -269,6 +271,7 @@ export function KnowledgeBasePanel({ projectId }: KnowledgeBasePanelProps) {
           个文本片段
         </div>
       )}
+      {ConfirmDialog}
     </div>
   );
 }
