@@ -36,6 +36,7 @@ export function ProjectList({ onSelectProject, autoCreate, onAutoCreateDone }: P
   const [importing, setImporting] = useState(false);
   const [createMode, setCreateMode] = useState<"chat" | "story">("chat");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const storyInputRef = useRef<HTMLInputElement>(null);
 
   // 从侧边栏点击"新建项目"时自动打开创建表单
   useEffect(() => {
@@ -96,6 +97,37 @@ export function ProjectList({ onSelectProject, autoCreate, onAutoCreateDone }: P
       // 重置 input 以便同一文件可再次选择
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
+      }
+    }
+  };
+
+  const handleImportStory = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const json = JSON.parse(text);
+      const { importStoryTemplate } = await import("@/services/story-service");
+      const { config, errors } = importStoryTemplate(json);
+      if (errors.length > 0) {
+        alert("导入剧本失败：" + errors.join("; "));
+        return;
+      }
+
+      const project = await createProject(
+        config.templateMeta?.name || "新故事",
+        undefined,
+        "story",
+        config
+      );
+      onSelectProject(project.id);
+    } catch (err) {
+      console.error("导入剧本失败:", err);
+      alert("导入剧本失败，请确认文件格式正确。");
+    } finally {
+      if (storyInputRef.current) {
+        storyInputRef.current.value = "";
       }
     }
   };
@@ -177,6 +209,21 @@ export function ProjectList({ onSelectProject, autoCreate, onAutoCreateDone }: P
             accept=".zip"
             className="hidden"
             onChange={handleImport}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => storyInputRef.current?.click()}
+          >
+            <BookOpen className="h-4 w-4 mr-1" />
+            导入剧本
+          </Button>
+          <input
+            ref={storyInputRef}
+            type="file"
+            accept=".huashu-story"
+            className="hidden"
+            onChange={handleImportStory}
           />
           <Button size="sm" onClick={() => setIsCreating(true)}>
             <Plus className="h-4 w-4 mr-1" />

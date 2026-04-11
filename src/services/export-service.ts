@@ -2,6 +2,7 @@ import JSZip from "jszip";
 import { v4 as uuidv4 } from "uuid";
 import { readFile, writeFile, BaseDirectory } from "@tauri-apps/plugin-fs";
 import { fileService } from "./file-service";
+import { projectService } from "./project-service";
 import type { Project } from "@/types";
 import type { Conversation } from "@/types";
 
@@ -302,5 +303,30 @@ export const exportService = {
     await fileService.writeJSON(`${convDir}/${newConvId}.json`, updatedConv);
 
     return newConvId;
+  },
+
+  /**
+   * 导入剧本模板文件
+   * 创建故事模式项目并填充模板内容
+   * 返回新项目 ID
+   */
+  async importStoryTemplate(
+    templateData: Record<string, unknown>
+  ): Promise<string> {
+    const { importStoryTemplate: parseTemplate } = await import("./story-service");
+    const { config, errors } = parseTemplate(templateData);
+    if (errors.length > 0) {
+      throw new Error(errors.join("; "));
+    }
+
+    // 创建故事模式项目
+    const project = await projectService.createProject(
+      config.templateMeta?.name || "新故事",
+      undefined,
+      "story",
+      config
+    );
+
+    return project.id;
   },
 };
