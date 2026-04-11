@@ -1,4 +1,4 @@
-import { parseChoices, type ParsedChoice } from "@/services/story-service";
+import { parseChoices } from "@/services/story-service";
 import { Button } from "@/components/ui/button";
 import { ChevronRight } from "lucide-react";
 

@@ -9,7 +9,6 @@ import {
   Globe,
   ScrollText,
   Users,
-  Plus,
   Trash2,
   Upload,
   Download,
@@ -81,17 +80,17 @@ export function StorySetupPanel({ projectId, storyConfig }: StorySetupPanelProps
       const text = new TextDecoder().decode(data);
       const json = JSON.parse(text);
 
-      const { config, errors } = importStoryTemplate(json);
+      const { storyConfig, errors } = importStoryTemplate(json);
       if (errors.length > 0) {
         setImportError(errors.join("; "));
         return;
       }
 
-      setWorldSetting(config.worldSetting);
-      setRules(config.rules);
-      setCharacters(config.characters);
-      setOpeningMessage(config.openingMessage);
-      await saveConfig(config);
+      setWorldSetting(storyConfig.worldSetting);
+      setRules(storyConfig.rules);
+      setCharacters(storyConfig.characters);
+      setOpeningMessage(storyConfig.openingMessage);
+      await saveConfig(storyConfig);
       setImportError(null);
     } catch (err) {
       setImportError(err instanceof Error ? err.message : "导入失败");

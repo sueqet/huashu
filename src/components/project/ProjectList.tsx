@@ -109,17 +109,17 @@ export function ProjectList({ onSelectProject, autoCreate, onAutoCreateDone }: P
       const text = await file.text();
       const json = JSON.parse(text);
       const { importStoryTemplate } = await import("@/services/story-service");
-      const { config, errors } = importStoryTemplate(json);
+      const { storyConfig, errors } = importStoryTemplate(json);
       if (errors.length > 0) {
         alert("导入剧本失败：" + errors.join("; "));
         return;
       }
 
       const project = await createProject(
-        config.templateMeta?.name || "新故事",
+        storyConfig.templateMeta?.name || "新故事",
         undefined,
         "story",
-        config
+        storyConfig
       );
       onSelectProject(project.id);
     } catch (err) {

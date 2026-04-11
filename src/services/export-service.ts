@@ -314,17 +314,17 @@ export const exportService = {
     templateData: Record<string, unknown>
   ): Promise<string> {
     const { importStoryTemplate: parseTemplate } = await import("./story-service");
-    const { config, errors } = parseTemplate(templateData);
+    const { storyConfig, errors } = parseTemplate(templateData);
     if (errors.length > 0) {
       throw new Error(errors.join("; "));
     }
 
     // 创建故事模式项目
     const project = await projectService.createProject(
-      config.templateMeta?.name || "新故事",
+      storyConfig.templateMeta?.name || "新故事",
       undefined,
       "story",
-      config
+      storyConfig
     );
 
     return project.id;
