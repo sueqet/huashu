@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useProjectStore } from "@/stores/project-store";
 import { useConversationStore } from "@/stores/conversation-store";
 import { KnowledgeBasePanel } from "./KnowledgeBasePanel";
+import { StorySetupPanel } from "./StorySetupPanel";
 import { Button } from "@/components/ui/button";
 import {
   ArrowLeft,
@@ -12,6 +13,7 @@ import {
   Check,
   X,
   Download,
+  BookOpen,
 } from "lucide-react";
 import { exportService } from "@/services/export-service";
 import { save } from "@tauri-apps/plugin-dialog";
@@ -45,6 +47,7 @@ export function ProjectDetail({
   const [isCreatingConv, setIsCreatingConv] = useState(false);
   const [newConvName, setNewConvName] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [renamingConvId, setRenamingConvId] = useState<string | null>(null);
   const [renameConvText, setRenameConvText] = useState("");
 
@@ -62,27 +65,49 @@ export function ProjectDetail({
 
   const [exportError, setExportError] = useState<string | null>(null);
 
-  const handleExportProject = async () => {
+  const handleExportFull = async () => {
     setExporting(true);
     setExportError(null);
+    setExportMenuOpen(false);
     try {
-      // 使用 Tauri 对话框选择保存路径
       const savePath = await save({
         defaultPath: `${project?.name || "project"}.zip`,
         filters: [{ name: "ZIP 文件", extensions: ["zip"] }],
       });
       if (!savePath) {
-        // 用户取消了保存
         setExporting(false);
         return;
       }
-
       const zipData = await exportService.exportProject(projectId);
-      // 使用 Tauri FS 写入文件到用户选择的路径
       await writeFile(savePath, new Uint8Array(zipData));
-      setExportError(null);
     } catch (err) {
       console.error("导出项目失败:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      setExportError(`导出失败：${msg}`);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleExportTemplate = async () => {
+    setExporting(true);
+    setExportError(null);
+    setExportMenuOpen(false);
+    try {
+      const { exportStoryTemplate } = await import("@/services/story-service");
+      const template = exportStoryTemplate(project.storyConfig!);
+      const json = JSON.stringify(template, null, 2);
+      const savePath = await save({
+        defaultPath: `${project.storyConfig?.templateMeta?.name || project?.name || "story-template"}.huashu-story`,
+        filters: [{ name: "话树剧本", extensions: ["huashu-story"] }],
+      });
+      if (!savePath) {
+        setExporting(false);
+        return;
+      }
+      await writeFile(savePath, new TextEncoder().encode(json));
+    } catch (err) {
+      console.error("导出剧本失败:", err);
       const msg = err instanceof Error ? err.message : String(err);
       setExportError(`导出失败：${msg}`);
     } finally {
@@ -168,69 +193,108 @@ export function ProjectDetail({
           {exportError && (
             <span className="text-xs text-destructive">{exportError}</span>
           )}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleExportProject}
-            disabled={exporting}
-          >
-            <Download className="h-4 w-4 mr-1" />
-            {exporting ? "导出中..." : "导出项目"}
-          </Button>
-        </div>
-      </div>
-
-      {/* 项目描述 */}
-      <div className="mb-6">
-        <div className="flex items-center gap-2 mb-2">
-          <span className="text-sm font-medium text-muted-foreground">
-            项目描述（作为系统提示词前缀）
-          </span>
-          {!isEditingDesc && (
+          {project.mode === "story" ? (
+            <div className="relative">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setExportMenuOpen(!exportMenuOpen)}
+                disabled={exporting}
+              >
+                <Download className="h-4 w-4 mr-1" />
+                {exporting ? "导出中..." : "导出"}
+              </Button>
+              {exportMenuOpen && (
+                <div className="absolute right-0 top-8 z-50 w-44 rounded-md border bg-popover p-1 shadow-md">
+                  <button
+                    className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent"
+                    onClick={handleExportFull}
+                  >
+                    <Download className="h-4 w-4" />
+                    导出完整存档
+                  </button>
+                  <button
+                    className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent"
+                    onClick={handleExportTemplate}
+                  >
+                    <Download className="h-4 w-4" />
+                    导出剧本模板
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
             <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6"
-              onClick={() => {
-                setEditDesc(project.description || "");
-                setIsEditingDesc(true);
-              }}
+              variant="outline"
+              size="sm"
+              onClick={handleExportFull}
+              disabled={exporting}
             >
-              <Pencil className="h-3 w-3" />
+              <Download className="h-4 w-4 mr-1" />
+              {exporting ? "导出中..." : "导出项目"}
             </Button>
           )}
         </div>
-        {isEditingDesc ? (
-          <div className="space-y-2">
-            <textarea
-              value={editDesc}
-              onChange={(e) => setEditDesc(e.target.value)}
-              placeholder="输入项目描述..."
-              className="w-full min-h-[100px] p-3 border rounded-md bg-background text-sm resize-y outline-none focus:ring-1 focus:ring-ring"
-              autoFocus
-            />
-            <div className="flex gap-2">
-              <Button size="sm" onClick={handleSaveDesc}>
-                保存
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setIsEditingDesc(false)}
-              >
-                取消
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            {project.description || "暂无描述，点击编辑按钮添加"}
-          </p>
-        )}
       </div>
 
-      {/* 知识库（RAG） */}
-      {project.ragEnabled && (
+      {/* 故事模式：显示 StorySetupPanel */}
+      {project.mode === "story" && project.storyConfig && (
+        <StorySetupPanel projectId={projectId} storyConfig={project.storyConfig} />
+      )}
+
+      {/* 对话模式：项目描述 */}
+      {project.mode !== "story" && (
+        <div className="mb-6">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-sm font-medium text-muted-foreground">
+              项目描述（作为系统提示词前缀）
+            </span>
+            {!isEditingDesc && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                onClick={() => {
+                  setEditDesc(project.description || "");
+                  setIsEditingDesc(true);
+                }}
+              >
+                <Pencil className="h-3 w-3" />
+              </Button>
+            )}
+          </div>
+          {isEditingDesc ? (
+            <div className="space-y-2">
+              <textarea
+                value={editDesc}
+                onChange={(e) => setEditDesc(e.target.value)}
+                placeholder="输入项目描述..."
+                className="w-full min-h-[100px] p-3 border rounded-md bg-background text-sm resize-y outline-none focus:ring-1 focus:ring-ring"
+                autoFocus
+              />
+              <div className="flex gap-2">
+                <Button size="sm" onClick={handleSaveDesc}>
+                  保存
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setIsEditingDesc(false)}
+                >
+                  取消
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              {project.description || "暂无描述，点击编辑按钮添加"}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* 知识库（RAG） - 故事模式自动启用，对话模式手动开关 */}
+      {project.mode !== "story" && project.ragEnabled && (
         <div className="mb-4">
           <div className="border rounded-lg">
             <KnowledgeBasePanel projectId={projectId} />
@@ -252,8 +316,8 @@ export function ProjectDetail({
         </div>
       )}
 
-      {/* RAG 开关 */}
-      {!project.ragEnabled && (
+      {/* RAG 开关 - 仅对话模式 */}
+      {project.mode !== "story" && !project.ragEnabled && (
         <div className="mb-4">
           <Button
             variant="outline"
@@ -268,10 +332,12 @@ export function ProjectDetail({
       {/* 对话列表 */}
       <div className="flex-1 overflow-hidden flex flex-col">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-lg font-medium">对话列表</h3>
+          <h3 className="text-lg font-medium">
+            {project.mode === "story" ? "章节列表" : "对话列表"}
+          </h3>
           <Button size="sm" onClick={() => setIsCreatingConv(true)}>
             <Plus className="h-4 w-4 mr-1" />
-            新建对话
+            {project.mode === "story" ? "新建章节" : "新建对话"}
           </Button>
         </div>
 
@@ -309,8 +375,17 @@ export function ProjectDetail({
         <div className="flex-1 overflow-y-auto space-y-1">
           {conversationList.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-              <MessageSquare className="h-10 w-10 mb-3 opacity-50" />
-              <p className="text-sm">还没有对话，点击上方按钮创建</p>
+              {project.mode === "story" ? (
+                <>
+                  <BookOpen className="h-10 w-10 mb-3 opacity-50" />
+                  <p className="text-sm">还没有章节，点击上方按钮创建</p>
+                </>
+              ) : (
+                <>
+                  <MessageSquare className="h-10 w-10 mb-3 opacity-50" />
+                  <p className="text-sm">还没有对话，点击上方按钮创建</p>
+                </>
+              )}
             </div>
           ) : (
             conversationList.map((conv) => (
