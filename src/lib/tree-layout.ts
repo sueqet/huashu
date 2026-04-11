@@ -62,6 +62,32 @@ function assignPositions(node: LayoutNode, x: number, y: number): void {
 }
 
 /**
+ * 收集布局树中所有节点的实际 x 坐标范围
+ */
+function collectBounds(node: LayoutNode): { minX: number; maxX: number } {
+  let minX = node.x;
+  let maxX = node.x + NODE_WIDTH;
+
+  for (const child of node.children) {
+    const childBounds = collectBounds(child);
+    minX = Math.min(minX, childBounds.minX);
+    maxX = Math.max(maxX, childBounds.maxX);
+  }
+
+  return { minX, maxX };
+}
+
+/**
+ * 将整棵布局树的所有节点平移指定偏移量
+ */
+function shiftTree(node: LayoutNode, dx: number): void {
+  node.x += dx;
+  for (const child of node.children) {
+    shiftTree(child, dx);
+  }
+}
+
+/**
  * 构建布局树结构
  */
 function buildLayoutTree(
@@ -114,6 +140,13 @@ export function computeTreeLayout(
     // 分配位置
     assignPositions(layoutTree, offsetX, 0);
 
+    // 收集实际边界并平移，确保不与前一棵树重叠
+    const bounds = collectBounds(layoutTree);
+    if (bounds.minX < offsetX) {
+      shiftTree(layoutTree, offsetX - bounds.minX);
+    }
+    offsetX = (bounds.minX < offsetX ? offsetX + (bounds.maxX - bounds.minX) : bounds.maxX) + HORIZONTAL_GAP * 2;
+
     // 展平布局树，生成 Flow 节点和边
     const queue: LayoutNode[] = [layoutTree];
     while (queue.length > 0) {
@@ -146,7 +179,6 @@ export function computeTreeLayout(
       }
     }
 
-    offsetX += layoutTree.width + HORIZONTAL_GAP * 2;
   }
 
   return { flowNodes, flowEdges };

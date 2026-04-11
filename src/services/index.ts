@@ -21,3 +21,17 @@ export {
   searchKnowledge,
   checkEmbeddingCompatibility,
 } from "./rag-service";
+export {
+  parseChoices,
+  removeChoiceMarkers,
+  buildStorySystemPrompt,
+  getStoryRagContext,
+  indexChapterSummaries,
+  generateChapterSummary,
+  generateChapterTransition,
+  exportStoryTemplate,
+  importStoryTemplate,
+  createDefaultStoryConfig,
+  getConversationText,
+  getRecentMessagesText,
+} from "./story-service";

@@ -1,4 +1,5 @@
-import { memo, useState, useCallback } from "react";
+import { memo, useState, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import { Handle, Position } from "@xyflow/react";
 import type { NodeProps } from "@xyflow/react";
 import { ChevronDown, ChevronRight, Pin, Star, Paperclip } from "lucide-react";
@@ -27,7 +28,10 @@ export const ChatNodeComponent = memo(function ChatNodeComponent({
   const nodeData = data as unknown as ChatNodeData;
   const { chatNode, isCollapsed, hasChildren, batchIndex } = nodeData;
   const [showPreview, setShowPreview] = useState(false);
+  const [previewPos, setPreviewPos] = useState({ top: 0, left: 0 });
   const isBatchSelected = batchIndex != null;
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const nodeRef = useRef<HTMLDivElement>(null);
 
   const isUser = chatNode.role === "user";
   const previewLength = isUser ? 50 : 80;
@@ -44,17 +48,31 @@ export const ChatNodeComponent = memo(function ChatNodeComponent({
   const bgColor = isUser ? "bg-blue-50" : "bg-green-50";
 
   const handleMouseEnter = useCallback(() => {
-    const timer = setTimeout(() => setShowPreview(true), 200);
-    return () => clearTimeout(timer);
+    hoverTimerRef.current = setTimeout(() => {
+      if (nodeRef.current) {
+        const rect = nodeRef.current.getBoundingClientRect();
+        setPreviewPos({ top: rect.bottom + 4, left: rect.left });
+      }
+      setShowPreview(true);
+    }, 200);
+  }, []);
+
+  const handleMouseLeave = useCallback(() => {
+    if (hoverTimerRef.current) {
+      clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+    setShowPreview(false);
   }, []);
 
   return (
     <div
+      ref={nodeRef}
       className={`relative rounded-lg border-2 ${borderColor} ${bgColor} shadow-sm w-[240px] select-none ${
         isBatchSelected ? "ring-2 ring-purple-500 ring-offset-1 animate-[batch-pulse_2s_ease-in-out_infinite]" : ""
       }`}
       onMouseEnter={handleMouseEnter}
-      onMouseLeave={() => setShowPreview(false)}
+      onMouseLeave={handleMouseLeave}
     >
       {/* 批量选择序号标记 */}
       {isBatchSelected && (
@@ -132,14 +150,18 @@ export const ChatNodeComponent = memo(function ChatNodeComponent({
         className="!bg-gray-400 !w-2 !h-2"
       />
 
-      {/* 悬停预览面板 */}
-      {showPreview && chatNode.content.length > previewLength && (
-        <div className="absolute z-50 top-full left-0 mt-2 w-[320px] max-h-[300px] overflow-y-auto rounded-lg border bg-popover p-3 shadow-lg">
+      {/* 悬停预览面板 - 使用 Portal 渲染到 body，确保在最上层 */}
+      {showPreview && chatNode.content.length > previewLength && createPortal(
+        <div
+          className="fixed z-[9999] w-[320px] max-h-[300px] overflow-y-auto rounded-lg border bg-popover p-3 shadow-xl pointer-events-none"
+          style={{ top: previewPos.top, left: previewPos.left }}
+        >
           <p className="text-xs whitespace-pre-wrap break-words">
             {chatNode.content.slice(0, 500)}
             {chatNode.content.length > 500 && "..."}
           </p>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

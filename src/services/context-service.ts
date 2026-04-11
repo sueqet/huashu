@@ -65,6 +65,10 @@ interface BuildContextOptions {
   model: string;
   /** 最近保留的轮数（不被裁剪） */
   recentRounds?: number;
+  /** 故事配置（故事模式时提供） */
+  storyConfig?: import("@/types").StoryConfig;
+  /** 故事 RAG 上下文（历史章节检索结果） */
+  storyRagContext?: string;
 }
 
 interface ContextResult {
@@ -101,7 +105,7 @@ function traceMessageChain(
  * 4. 首轮对话尽量保留
  * 5. 中间对话按从旧到新裁剪
  */
-export function buildContext(options: BuildContextOptions): ContextResult {
+export async function buildContext(options: BuildContextOptions): Promise<ContextResult> {
   const {
     nodes,
     currentNodeId,
@@ -110,24 +114,36 @@ export function buildContext(options: BuildContextOptions): ContextResult {
     maxTokens,
     model,
     recentRounds = 3,
+    storyConfig,
+    storyRagContext,
   } = options;
 
   const messages: ContextMessage[] = [];
   let truncated = false;
 
   // 1. 构建 system 消息
-  const systemParts: string[] = [];
-  if (projectDescription) {
-    systemParts.push(projectDescription);
-  }
-  if (ragContext) {
-    systemParts.push("以下是相关的参考资料：\n" + ragContext);
-  }
-  if (systemParts.length > 0) {
-    messages.push({
-      role: "system",
-      content: systemParts.join("\n\n"),
-    });
+  if (storyConfig) {
+    // 故事模式：使用 story-service 拼装 system prompt
+    const { buildStorySystemPrompt } = await import("./story-service");
+    const storyPrompt = buildStorySystemPrompt(storyConfig, storyRagContext);
+    if (storyPrompt) {
+      messages.push({ role: "system", content: storyPrompt });
+    }
+  } else {
+    // 对话模式：原有逻辑
+    const systemParts: string[] = [];
+    if (projectDescription) {
+      systemParts.push(projectDescription);
+    }
+    if (ragContext) {
+      systemParts.push("以下是相关的参考资料：\n" + ragContext);
+    }
+    if (systemParts.length > 0) {
+      messages.push({
+        role: "system",
+        content: systemParts.join("\n\n"),
+      });
+    }
   }
 
   // 2. 追溯消息链

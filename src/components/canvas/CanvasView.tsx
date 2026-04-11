@@ -37,6 +37,7 @@ import {
 } from "@/components/ui/dialog";
 import { ArrowLeft, Plus, Search, Loader2 } from "lucide-react";
 import { conversationService, streamChatCompletion } from "@/services";
+import { useConfirm } from "@/hooks/useConfirm";
 
 const nodeTypes = {
   chatNode: ChatNodeComponent,
@@ -125,6 +126,8 @@ function CanvasViewInner({
 
   // 记录拖拽起始位置，用于子树跟随移动
   const dragStartPositions = useRef<Map<string, { x: number; y: number }>>(new Map());
+
+  const { confirm, ConfirmDialog } = useConfirm();
 
   // 加载对话
   useEffect(() => {
@@ -351,11 +354,10 @@ function CanvasViewInner({
     if (!conversation) return;
     if (batchSelectedIds.length < 2) return;
 
-    const confirmed = window.confirm(
-      `将 ${batchSelectedIds.length} 个选中节点构建为新的线性树？\n` +
-      `第一个节点将成为根节点，后续节点依次成为子节点。\n` +
-      `原有的父子关系将被修改。`
-    );
+    const confirmed = await confirm({
+      title: `将 ${batchSelectedIds.length} 个选中节点构建为新的线性树？`,
+      description: "第一个节点将成为根节点，后续节点依次成为子节点。原有的父子关系将被修改。",
+    });
     if (!confirmed) return;
 
     takeSnapshot(conversation);
@@ -393,17 +395,17 @@ function CanvasViewInner({
     conv.updatedAt = Date.now();
     await restoreConversation(conv);
     useEditStore.getState().clearBatchSelection();
-  }, [conversation, batchSelectedIds, takeSnapshot, restoreConversation]);
+  }, [conversation, batchSelectedIds, takeSnapshot, restoreConversation, confirm]);
 
   // 批量复制为新树：克隆节点形成新的独立树
   const handleBatchCopyTree = useCallback(async () => {
     if (!conversation) return;
     if (batchSelectedIds.length < 1) return;
 
-    const confirmed = window.confirm(
-      `将 ${batchSelectedIds.length} 个选中节点复制为新的线性树？\n` +
-      `原节点不会被修改，将创建副本。`
-    );
+    const confirmed = await confirm({
+      title: `将 ${batchSelectedIds.length} 个选中节点复制为新的线性树？`,
+      description: "原节点不会被修改，将创建副本。",
+    });
     if (!confirmed) return;
 
     takeSnapshot(conversation);
@@ -445,16 +447,17 @@ function CanvasViewInner({
     conv.updatedAt = now;
     await restoreConversation(conv);
     useEditStore.getState().clearBatchSelection();
-  }, [conversation, batchSelectedIds, takeSnapshot, restoreConversation]);
+  }, [conversation, batchSelectedIds, takeSnapshot, restoreConversation, confirm]);
 
   // 批量删除
   const handleBatchDelete = useCallback(async () => {
     if (!conversation) return;
     if (batchSelectedIds.length === 0) return;
 
-    const confirmed = window.confirm(
-      `确定要删除 ${batchSelectedIds.length} 个选中节点及其所有子树吗？此操作可通过撤销恢复。`
-    );
+    const confirmed = await confirm({
+      title: `确定要删除 ${batchSelectedIds.length} 个选中节点及其所有子树吗？`,
+      description: "此操作可通过撤销恢复。",
+    });
     if (!confirmed) return;
 
     takeSnapshot(conversation);
@@ -497,7 +500,7 @@ function CanvasViewInner({
 
     useEditStore.getState().clearBatchSelection();
     setSelectedNodeId(null);
-  }, [conversation, batchSelectedIds, takeSnapshot, restoreConversation]);
+  }, [conversation, batchSelectedIds, takeSnapshot, restoreConversation, confirm]);
 
   // 打开总结对话框
   const handleBatchSummarize = useCallback(() => {
@@ -937,6 +940,7 @@ function CanvasViewInner({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {ConfirmDialog}
     </div>
   );
 }
