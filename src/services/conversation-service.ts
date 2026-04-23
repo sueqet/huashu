@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import type { Conversation, ChatNode, Attachment } from "@/types";
 import { fileService } from "./file-service";
+import { attachmentService } from "./attachment-service";
 
 const CURRENT_SCHEMA_VERSION = 1;
 
@@ -92,24 +93,36 @@ export const conversationService = {
   },
 
   /**
-   * 保存对话（完整覆盖写入）
+   * 保存对话（完整覆盖写入，剥离附件 data）
    */
   async saveConversation(conversation: Conversation): Promise<void> {
     const updated = { ...conversation, updatedAt: Date.now() };
+
+    // 剥离所有附件的 data 字段，仅保留 filePath
+    for (const node of Object.values(updated.nodes)) {
+      if (node.attachments) {
+        node.attachments = node.attachments.map((att) =>
+          attachmentService.stripAttachmentData(att)
+        );
+      }
+    }
+
     await fileService.writeJSON(
-      conversationPath(conversation.projectId, conversation.id),
+      conversationPath(updated.projectId, updated.id),
       updated
     );
   },
 
   /**
-   * 删除对话
+   * 删除对话（包括附件文件）
    */
   async deleteConversation(
     projectId: string,
     convId: string
   ): Promise<void> {
     await fileService.removeFile(conversationPath(projectId, convId));
+    // 清理附件目录
+    await attachmentService.deleteConversationAttachments(projectId, convId);
   },
 
   /**

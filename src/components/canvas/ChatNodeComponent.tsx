@@ -4,6 +4,7 @@ import { Handle, Position } from "@xyflow/react";
 import type { NodeProps } from "@xyflow/react";
 import { ChevronDown, ChevronRight, Pin, Star, Paperclip } from "lucide-react";
 import type { ChatNodeData } from "@/lib/tree-layout";
+import { AttachmentThumbnail } from "@/components/ui/attachment-thumbnail";
 
 /** Dispatch a custom event to toggle collapse for a node on the canvas */
 function dispatchToggleCollapse(nodeId: string) {
@@ -26,7 +27,7 @@ export const ChatNodeComponent = memo(function ChatNodeComponent({
   data,
 }: NodeProps) {
   const nodeData = data as unknown as ChatNodeData;
-  const { chatNode, isCollapsed, hasChildren, batchIndex } = nodeData;
+  const { chatNode, projectId, isCollapsed, hasChildren, batchIndex } = nodeData;
   const [showPreview, setShowPreview] = useState(false);
   const [previewPos, setPreviewPos] = useState({ top: 0, left: 0 });
   const isBatchSelected = batchIndex != null;
@@ -110,7 +111,27 @@ export const ChatNodeComponent = memo(function ChatNodeComponent({
             <Star className="h-3 w-3 text-yellow-500 fill-yellow-500" />
           )}
           {chatNode.attachments && chatNode.attachments.length > 0 && (
-            <Paperclip className="h-3 w-3 text-muted-foreground" />
+            (() => {
+              const images = chatNode.attachments.filter(a => a.type === "image");
+              if (images.length > 0) {
+                return (
+                  <span className="relative inline-flex">
+                    <AttachmentThumbnail
+                      attachment={images[0]}
+                      projectId={projectId}
+                      size="node"
+                      className="!h-6 !w-6 !rounded-sm"
+                    />
+                    {chatNode.attachments.length > 1 && (
+                      <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-[8px] rounded-full h-3 w-3 flex items-center justify-center">
+                        {chatNode.attachments.length}
+                      </span>
+                    )}
+                  </span>
+                );
+              }
+              return <Paperclip className="h-3 w-3 text-muted-foreground" />;
+            })()
           )}
           {chatNode.modelName && (
             <span className="ml-auto text-[10px] text-muted-foreground truncate max-w-[80px]">

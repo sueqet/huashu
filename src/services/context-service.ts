@@ -1,5 +1,6 @@
 import type { ChatNode } from "@/types";
 import { countTokens, countMessagesTokens } from "./token-service";
+import { attachmentService } from "./attachment-service";
 
 /** OpenAI Vision 格式的内容部分 */
 export type ContentPart =
@@ -11,8 +12,8 @@ export interface ContextMessage {
   content: string | ContentPart[];
 }
 
-/** 将 ChatNode 转为 ContextMessage，处理附件 */
-function nodeToMessage(node: ChatNode): ContextMessage {
+/** 将 ChatNode 转为 ContextMessage，处理附件（异步，按需加载附件数据） */
+async function nodeToMessage(node: ChatNode, projectId?: string): Promise<ContextMessage> {
   const attachments = node.attachments || [];
   const images = attachments.filter((a) => a.type === "image");
   const docs = attachments.filter((a) => a.type === "document");
@@ -22,6 +23,19 @@ function nodeToMessage(node: ChatNode): ContextMessage {
     return { role: node.role, content: node.content };
   }
 
+  // 按需加载附件数据
+  if (projectId) {
+    for (const att of attachments) {
+      if (!att.data) {
+        try {
+          await attachmentService.readAttachmentData(projectId, att);
+        } catch (err) {
+          console.warn(`加载附件数据失败: ${att.id}`, err);
+        }
+      }
+    }
+  }
+
   // 有图片附件：使用 content 数组格式
   if (images.length > 0) {
     const parts: ContentPart[] = [];
@@ -29,7 +43,7 @@ function nodeToMessage(node: ChatNode): ContextMessage {
     let textContent = node.content;
     if (docs.length > 0) {
       const docTexts = docs
-        .map((d) => `[附件: ${d.filename}]\n${d.data}`)
+        .map((d) => `[附件: ${d.filename}]\n${d.data || "(加载失败)"}`)
         .join("\n\n");
       textContent = textContent + "\n\n" + docTexts;
     }
@@ -38,14 +52,14 @@ function nodeToMessage(node: ChatNode): ContextMessage {
     }
     // 图片
     for (const img of images) {
-      parts.push({ type: "image_url", image_url: { url: img.data } });
+      parts.push({ type: "image_url", image_url: { url: img.data || "" } });
     }
     return { role: node.role, content: parts };
   }
 
   // 只有文档附件：拼接到文本中
   const docTexts = docs
-    .map((d) => `[附件: ${d.filename}]\n${d.data}`)
+    .map((d) => `[附件: ${d.filename}]\n${d.data || "(加载失败)"}`)
     .join("\n\n");
   return { role: node.role, content: node.content + "\n\n" + docTexts };
 }
@@ -55,6 +69,8 @@ interface BuildContextOptions {
   nodes: Record<string, ChatNode>;
   /** 当前节点 ID */
   currentNodeId: string;
+  /** 项目 ID（用于按需加载附件数据） */
+  projectId?: string;
   /** 项目描述（作为 system 消息前缀） */
   projectDescription?: string;
   /** RAG 检索结果 */
@@ -109,6 +125,7 @@ export async function buildContext(options: BuildContextOptions): Promise<Contex
   const {
     nodes,
     currentNodeId,
+    projectId,
     projectDescription,
     ragContext,
     maxTokens,
@@ -168,7 +185,7 @@ export async function buildContext(options: BuildContextOptions): Promise<Contex
   const unpinnedMiddle = middleMessages.filter((n) => !n.isPinned);
 
   const fixedNodes = [...firstRound, ...pinnedMiddle, ...recentMessages];
-  const fixedMessages = fixedNodes.map((n) => nodeToMessage(n));
+  const fixedMessages = await Promise.all(fixedNodes.map((n) => nodeToMessage(n, projectId)));
   const fixedTokens = systemTokens + countMessagesTokens(fixedMessages, model);
 
   // 5. 从剩余空间中尽量多保留中间消息（从新到旧加入）
@@ -199,7 +216,7 @@ export async function buildContext(options: BuildContextOptions): Promise<Contex
   for (const node of allNodes) {
     if (seen.has(node.id)) continue;
     seen.add(node.id);
-    messages.push(nodeToMessage(node));
+    messages.push(await nodeToMessage(node, projectId));
   }
 
   const totalTokens = countMessagesTokens(messages, model);

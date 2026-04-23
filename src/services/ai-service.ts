@@ -1,10 +1,20 @@
 import type { ContextMessage } from "./context-service";
 import type { ModelConfig } from "@/types";
 
+/** 内联图片数据（从多模态模型响应中解析） */
+export interface InlineImageData {
+  /** 图片 URL（data URL 或 HTTP URL） */
+  url: string;
+  /** 可选的图片描述 */
+  alt?: string;
+}
+
 export interface StreamCallbacks {
   onToken: (token: string) => void;
   onDone: (fullContent: string) => void;
   onError: (error: Error) => void;
+  /** 内联图片回调（多模态模型返回的图片） */
+  onImage?: (image: InlineImageData) => void;
 }
 
 interface ChatCompletionOptions {
@@ -20,6 +30,7 @@ interface ChatCompletionOptions {
 /**
  * OpenAI 兼容的流式 AI 调用服务
  * 支持所有兼容 OpenAI Chat Completions API 的厂商
+ * 支持多模态模型内联图片输出
  */
 export async function streamChatCompletion(
   options: ChatCompletionOptions
@@ -105,10 +116,38 @@ export async function streamChatCompletion(
 
         try {
           const parsed = JSON.parse(data);
-          const delta = parsed.choices?.[0]?.delta?.content;
-          if (delta) {
-            fullContent += delta;
-            callbacks.onToken(delta);
+          const choice = parsed.choices?.[0];
+          if (!choice) continue;
+
+          const delta = choice.delta;
+
+          // 标准文本内容
+          if (delta?.content && typeof delta.content === "string") {
+            fullContent += delta.content;
+            callbacks.onToken(delta.content);
+          }
+
+          // 多模态内联图片：delta.content 为数组格式
+          if (Array.isArray(delta?.content)) {
+            for (const part of delta.content) {
+              if (part.type === "text" && part.text) {
+                fullContent += part.text;
+                callbacks.onToken(part.text);
+              } else if (part.type === "image_url" && part.image_url?.url) {
+                callbacks.onImage?.({
+                  url: part.image_url.url,
+                  alt: part.image_url.alt,
+                });
+              }
+            }
+          }
+
+          // 直接 image_url 字段（部分 API 使用此格式）
+          if (delta?.image_url?.url) {
+            callbacks.onImage?.({
+              url: delta.image_url.url,
+              alt: delta.image_url.alt,
+            });
           }
         } catch {
           // 忽略解析错误，继续处理下一行

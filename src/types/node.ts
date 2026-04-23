@@ -21,10 +21,12 @@ export interface Attachment {
   type: AttachmentType;
   filename: string;
   mimeType: string;
-  /** base64 data URL (图片) 或解析后的文本 (文档) */
-  data: string;
+  /** 文件路径，相对于项目附件目录："{convId}/{attId}.{ext}" */
+  filePath: string;
   /** 原始文件大小（字节） */
   size: number;
+  /** 内存缓存，不持久化到 JSON（base64 data URL 图片 / 文本 文档） */
+  data?: string;
 }
 
 /** 对话节点角色 */

@@ -3,6 +3,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { MainContent } from "@/components/layout/MainContent";
 import { CanvasView } from "@/components/canvas/CanvasView";
 import { fileService } from "@/services";
+import { migrateAttachments } from "@/services";
 import { useProjectStore } from "@/stores/project-store";
 import { useConfigStore } from "@/stores/config-store";
 
@@ -20,6 +21,8 @@ function App() {
       try {
         await fileService.initAppDataDir();
         await Promise.all([loadProjects(), loadConfig()]);
+        // 迁移旧的 base64 内嵌附件到独立文件
+        await migrateAttachments();
       } catch (err) {
         console.error("初始化失败:", err);
       } finally {

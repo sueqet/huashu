@@ -20,6 +20,16 @@ export interface ModelConfig {
   presencePenalty: number;
 }
 
+/** 图片生成配置 */
+export interface ImageGenerationConfig {
+  /** 图片生成模型名称 */
+  model: string;
+  /** 图片尺寸，如 "1024x1024" */
+  size: string;
+  /** 可选的独立图片生成 API 端点 */
+  apiUrl?: string;
+}
+
 /** API 厂商配置 */
 export interface ApiProvider {
   /** 厂商唯一标识符 */
@@ -38,6 +48,8 @@ export interface ApiProvider {
   maxContextTokens: number;
   /** Embedding 配置 */
   embedding?: EmbeddingConfig;
+  /** 图片生成配置 */
+  imageGeneration?: ImageGenerationConfig;
   /** 模型额外参数配置 */
   modelConfig: ModelConfig;
 }

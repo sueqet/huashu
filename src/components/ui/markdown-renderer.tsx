@@ -155,6 +155,23 @@ const markdownComponents = {
   hr() {
     return <hr className="my-4 border-border" />;
   },
+  img({ src, alt }: any) {
+    return (
+      <img
+        src={src}
+        alt={alt || ""}
+        className="max-h-[300px] max-w-full rounded-lg border cursor-pointer"
+        loading="lazy"
+        onClick={() => {
+          window.dispatchEvent(
+            new CustomEvent("open-attachment-viewer", {
+              detail: { type: "image", src, alt: alt || "" },
+            })
+          );
+        }}
+      />
+    );
+  },
 };
 
 // Code block with copy button

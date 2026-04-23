@@ -88,6 +88,7 @@ export const projectService = {
     // 创建项目目录结构
     await fileService.ensureDir(projectDir(id));
     await fileService.ensureDir(`${projectDir(id)}/conversations`);
+    await fileService.ensureDir(`${projectDir(id)}/attachments`);
     await fileService.ensureDir(`${projectDir(id)}/knowledge_base`);
     await fileService.ensureDir(`${projectDir(id)}/knowledge_base/documents`);
 

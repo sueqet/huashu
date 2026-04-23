@@ -38,6 +38,7 @@ import {
 import { ArrowLeft, Plus, Search, Loader2 } from "lucide-react";
 import { conversationService, streamChatCompletion } from "@/services";
 import { useConfirm } from "@/hooks/useConfirm";
+import { AttachmentViewerSheet } from "@/components/ui/attachment-viewer";
 
 const nodeTypes = {
   chatNode: ChatNodeComponent,
@@ -140,7 +141,8 @@ function CanvasViewInner({
     const { flowNodes, flowEdges } = computeTreeLayout(
       conversation.nodes,
       conversation.rootNodeIds,
-      collapsedIds
+      collapsedIds,
+      conversation.projectId
     );
 
     const batchIdSet = new Map<string, number>();
@@ -941,6 +943,7 @@ function CanvasViewInner({
         </DialogContent>
       </Dialog>
       {ConfirmDialog}
+      <AttachmentViewerSheet />
     </div>
   );
 }

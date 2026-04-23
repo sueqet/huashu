@@ -13,7 +13,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { useConfirm } from "@/hooks/useConfirm";
-import type { ApiProvider, ModelConfig, EmbeddingConfig } from "@/types";
+import type { ApiProvider, ModelConfig, EmbeddingConfig, ImageGenerationConfig } from "@/types";
 
 export function SettingsPage() {
   const {
@@ -152,6 +152,18 @@ function ProviderForm({ initial, onSave, onCancel }: ProviderFormProps) {
     initial?.embedding?.dimension || 1536
   );
 
+  // 图片生成配置
+  const [imgGenEnabled, setImgGenEnabled] = useState(!!initial?.imageGeneration);
+  const [imgGenModel, setImgGenModel] = useState(
+    initial?.imageGeneration?.model || "dall-e-3"
+  );
+  const [imgGenSize, setImgGenSize] = useState(
+    initial?.imageGeneration?.size || "1024x1024"
+  );
+  const [imgGenApiUrl, setImgGenApiUrl] = useState(
+    initial?.imageGeneration?.apiUrl || ""
+  );
+
   const defaultConfig: ModelConfig = initial?.modelConfig || {
     temperature: 0.7,
     maxTokens: 4096,
@@ -173,6 +185,13 @@ function ProviderForm({ initial, onSave, onCancel }: ProviderFormProps) {
       const embedding: EmbeddingConfig | undefined = embeddingModel.trim()
         ? { model: embeddingModel.trim(), dimension: embeddingDimension }
         : undefined;
+      const imageGeneration: ImageGenerationConfig | undefined = imgGenEnabled
+        ? {
+            model: imgGenModel.trim(),
+            size: imgGenSize,
+            ...(imgGenApiUrl.trim() ? { apiUrl: imgGenApiUrl.trim() } : {}),
+          }
+        : undefined;
       await onSave({
         name: name.trim(),
         apiUrl: apiUrl.trim(),
@@ -181,6 +200,7 @@ function ProviderForm({ initial, onSave, onCancel }: ProviderFormProps) {
         defaultModel: defaultModel || modelList[0] || "",
         maxContextTokens,
         embedding,
+        imageGeneration,
         modelConfig,
       });
     } finally {
@@ -367,6 +387,56 @@ function ProviderForm({ initial, onSave, onCancel }: ProviderFormProps) {
         </div>
       </div>
 
+      {/* 图片生成配置 */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <label className="text-xs font-medium text-muted-foreground">
+            图片生成（DALL-E 兼容 API，可选）
+          </label>
+          <Switch checked={imgGenEnabled} onCheckedChange={setImgGenEnabled} />
+        </div>
+        {imgGenEnabled && (
+          <div className="space-y-2 pl-2 border-l-2 border-muted">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-muted-foreground">图片生成模型</label>
+                <input
+                  type="text"
+                  value={imgGenModel}
+                  onChange={(e) => setImgGenModel(e.target.value)}
+                  placeholder="dall-e-3"
+                  className="w-full mt-1 px-2 py-1 border rounded text-sm bg-background outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground">图片尺寸</label>
+                <select
+                  value={imgGenSize}
+                  onChange={(e) => setImgGenSize(e.target.value)}
+                  className="w-full mt-1 px-2 py-1 border rounded text-sm bg-background outline-none"
+                >
+                  <option value="1024x1024">1024x1024</option>
+                  <option value="1024x1792">1024x1792</option>
+                  <option value="1792x1024">1792x1024</option>
+                  <option value="512x512">512x512</option>
+                  <option value="256x256">256x256</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground">独立端点（留空使用上方 API 地址）</label>
+              <input
+                type="text"
+                value={imgGenApiUrl}
+                onChange={(e) => setImgGenApiUrl(e.target.value)}
+                placeholder="https://api.openai.com/v1"
+                className="w-full mt-1 px-2 py-1 border rounded text-sm bg-background outline-none"
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
       <div className="flex gap-2 pt-2">
         <Button size="sm" onClick={handleSubmit} disabled={saving || !name.trim()}>
           {saving ? "保存中..." : "保存"}
@@ -467,6 +537,14 @@ function ProviderCard({
                     <span className="text-muted-foreground">Embedding：</span>
                     <span>
                       {provider.embedding.model} ({provider.embedding.dimension}维)
+                    </span>
+                  </div>
+                )}
+                {provider.imageGeneration && (
+                  <div>
+                    <span className="text-muted-foreground">图片生成：</span>
+                    <span>
+                      {provider.imageGeneration.model} ({provider.imageGeneration.size})
                     </span>
                   </div>
                 )}

@@ -1,12 +1,14 @@
 import { useMemo, useState, useRef, useEffect, useCallback } from "react";
-import type { Conversation, ChatNode, ChapterSummary } from "@/types";
+import type { Conversation, ChatNode, ChapterSummary, Attachment } from "@/types";
 import { useConversationStore } from "@/stores/conversation-store";
 import { useEditStore } from "@/stores/edit-store";
 import { useConfigStore } from "@/stores/config-store";
 import { useProjectStore } from "@/stores/project-store";
-import { conversationService, buildContext, streamChatCompletion } from "@/services";
+import { conversationService, buildContext, streamChatCompletion, generateImage } from "@/services";
 import { searchKnowledge } from "@/services/rag-service";
+import { attachmentService } from "@/services/attachment-service";
 import { useAttachments } from "@/hooks/useAttachments";
+import { useDragDrop } from "@/hooks/useDragDrop";
 import { StoryChoices } from "./StoryChoices";
 import {
   getConversationText,
@@ -17,6 +19,8 @@ import {
 } from "@/services/story-service";
 import { countMessagesTokens } from "@/services/token-service";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
+import { AttachmentImage } from "@/components/ui/attachment-image";
+import { AttachmentViewerSheet } from "@/components/ui/attachment-viewer";
 import { Button } from "@/components/ui/button";
 import {
   ArrowLeft,
@@ -34,6 +38,7 @@ import {
   FileText,
   X,
   Paperclip,
+  Wand2,
 } from "lucide-react";
 import {
   Tooltip,
@@ -91,9 +96,14 @@ export function ChatView({
     handlePaste,
     pickImages,
     pickDocuments,
+    addFiles,
     removeAttachment,
     clearAttachments,
-  } = useAttachments();
+  } = useAttachments(conversation.projectId, conversation.id);
+
+  const { isDragging, dragHandlers } = useDragDrop({
+    onFiles: addFiles,
+  });
 
   const messages = useMemo(
     () => traceMessages(conversation.nodes, selectedNodeId),
@@ -311,6 +321,7 @@ export function ChatView({
       const context = await buildContext({
         nodes: freshNodes,
         currentNodeId: targetNodeId,
+        projectId: conversation.projectId,
         projectDescription: freshProject?.description,
         ragContext,
         maxTokens: activeProvider.maxContextTokens,
@@ -332,6 +343,42 @@ export function ChatView({
           onToken: (token) => {
             fullContent += token;
             setStreamingContent(fullContent);
+          },
+          onImage: async (image) => {
+            // 多模态内联图片：创建 Attachment 并保存
+            try {
+              const attId = crypto.randomUUID();
+              const isDataUrl = image.url.startsWith("data:");
+              const mimeType = isDataUrl ? image.url.split(";")[0].split(":")[1] : "image/png";
+              const ext = mimeType.split("/")[1] || "png";
+              const filePath = `${conversation.id}/${attId}.${ext}`;
+
+              const attachment: Attachment = {
+                id: attId,
+                type: "image",
+                filename: `inline_${Date.now()}.${ext}`,
+                mimeType,
+                filePath,
+                size: 0,
+                data: image.url,
+              };
+
+              await attachmentService.saveAttachment(conversation.projectId, conversation.id, attachment);
+
+              // 添加到当前 AI 节点的 attachments
+              const freshConv = useConversationStore.getState().conversation;
+              if (freshConv) {
+                const node = freshConv.nodes[aiNode.id];
+                if (node) {
+                  const existingAtts = node.attachments || [];
+                  await updateNodeAndSave(aiNode.id, {
+                    attachments: [...existingAtts, attachmentService.stripAttachmentData(attachment)],
+                  });
+                }
+              }
+            } catch (err) {
+              console.warn("保存内联图片失败:", err);
+            }
           },
           onDone: async (content) => {
             await updateNodeAndSave(aiNode.id, {
@@ -411,6 +458,81 @@ export function ChatView({
   const handleStop = useCallback(() => {
     abortControllerRef.current?.abort();
   }, []);
+
+  // 图片生成
+  const handleGenerateImage = useCallback(async () => {
+    if (!activeProvider || !activeProvider.imageGeneration) return;
+    const prompt = inputText.trim();
+    if (!prompt) return;
+
+    const imgConfig = activeProvider.imageGeneration;
+    setIsGenerating(true);
+    setError(null);
+
+    try {
+      // 创建用户节点（显示 prompt）
+      const userNode = conversationService.createNode(
+        conversation.id,
+        "user",
+        prompt,
+        selectedNodeId
+      );
+      await addNodeAndSave(userNode);
+      setInputText("");
+      onSelectNode(userNode.id);
+
+      // 调用图片生成 API
+      const result = await generateImage(
+        imgConfig.apiUrl || activeProvider.apiUrl,
+        activeProvider.apiKey,
+        imgConfig.model,
+        prompt,
+        imgConfig.size
+      );
+
+      // 将图片转为 Attachment
+      const attId = crypto.randomUUID();
+      const ext = "png";
+      const filePath = `${conversation.id}/${attId}.${ext}`;
+      const dataUrl = result.b64_json
+        ? `data:image/png;base64,${result.b64_json}`
+        : result.url || "";
+
+      if (!dataUrl) throw new Error("图片生成 API 未返回图片数据");
+
+      const attachment: Attachment = {
+        id: attId,
+        type: "image",
+        filename: `generated_${Date.now()}.png`,
+        mimeType: "image/png",
+        filePath,
+        size: result.b64_json?.length || 0,
+        data: dataUrl,
+      };
+
+      // 保存附件到磁盘
+      await attachmentService.saveAttachment(conversation.projectId, conversation.id, attachment);
+
+      // 创建 AI 回复节点
+      const aiContent = result.revised_prompt
+        ? `*生成提示词: ${result.revised_prompt}*`
+        : "已生成图片";
+      const aiNode = conversationService.createNode(
+        conversation.id,
+        "assistant",
+        aiContent,
+        userNode.id
+      );
+      aiNode.modelName = imgConfig.model;
+      aiNode.attachments = [attachmentService.stripAttachmentData(attachment)];
+      await addNodeAndSave(aiNode);
+      onSelectNode(aiNode.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [activeProvider, inputText, conversation.id, conversation.projectId, selectedNodeId, addNodeAndSave, onSelectNode]);
 
   const handleRegenerate = useCallback(async () => {
     if (!currentNode || currentNode.role !== "assistant") return;
@@ -553,6 +675,7 @@ export function ChatView({
                 <ChatBubble
                   node={msg}
                   isSelected={msg.id === selectedNodeId}
+                  projectId={conversation.projectId}
                   autoEdit={
                     msg === messages[messages.length - 1] &&
                     msg.role === "user" &&
@@ -653,7 +776,16 @@ export function ChatView({
       )}
 
       {/* 输入区域 */}
-      <div className="border-t bg-background">
+      <div className="border-t bg-background relative" {...dragHandlers}>
+        {/* 拖拽覆盖层 */}
+        {isDragging && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-primary/10 backdrop-blur-sm border-2 border-dashed border-primary/50 rounded-lg">
+            <div className="flex flex-col items-center gap-2 text-primary">
+              <ImageIcon className="h-8 w-8" />
+              <span className="text-sm font-medium">拖放图片或文档到这里</span>
+            </div>
+          </div>
+        )}
         <div className="max-w-3xl mx-auto p-4">
           {/* 附件预览 */}
           {attachments.length > 0 && (
@@ -664,9 +796,9 @@ export function ChatView({
                   className="relative group/att flex items-center gap-1.5 px-2 py-1 rounded-lg border bg-muted/50 text-xs"
                 >
                   {att.type === "image" ? (
-                    <img
-                      src={att.data}
-                      alt={att.filename}
+                    <AttachmentImage
+                      attachment={att}
+                      projectId={conversation.projectId}
                       className="h-10 w-10 object-cover rounded"
                     />
                   ) : (
@@ -719,6 +851,24 @@ export function ChatView({
                   <TooltipContent side="top"><p>上传文档</p></TooltipContent>
                 </Tooltip>
               </TooltipProvider>
+              {activeProvider?.imageGeneration && (
+                <TooltipProvider delayDuration={300}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9"
+                        onClick={handleGenerateImage}
+                        disabled={isGenerating || !inputText.trim()}
+                      >
+                        <Wand2 className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top"><p>生成图片</p></TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
             </div>
             <textarea
               ref={inputRef}
@@ -750,10 +900,11 @@ export function ChatView({
             </Button>
           </div>
           <p className="text-[10px] text-muted-foreground mt-1.5">
-            Enter 发送，Shift+Enter 换行，Ctrl+V 粘贴图片
+            Enter 发送，Shift+Enter 换行，Ctrl+V 粘贴图片，拖拽上传
           </p>
         </div>
       </div>
+      <AttachmentViewerSheet />
     </div>
   );
 }
@@ -763,6 +914,7 @@ export function ChatView({
 interface ChatBubbleProps {
   node: ChatNode;
   isSelected: boolean;
+  projectId: string;
   autoEdit?: boolean;
   onTogglePin: () => void;
   onToggleStar: () => void;
@@ -773,12 +925,20 @@ interface ChatBubbleProps {
 function ChatBubble({
   node,
   isSelected,
+  projectId,
   autoEdit,
   onTogglePin,
   onToggleStar,
   onEditContent,
   onEditSaved,
 }: ChatBubbleProps) {
+  const openAttachmentViewer = useCallback((att: Attachment) => {
+    window.dispatchEvent(
+      new CustomEvent("open-attachment-viewer", {
+        detail: { attachment: att, projectId },
+      })
+    );
+  }, [projectId]);
   const isUser = node.role === "user";
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState("");
@@ -919,16 +1079,18 @@ function ChatBubble({
         <div className="flex flex-wrap gap-2 mb-2">
           {nodeAttachments.map((att) =>
             att.type === "image" ? (
-              <img
+              <AttachmentImage
                 key={att.id}
-                src={att.data}
-                alt={att.filename}
-                className="max-h-[200px] max-w-full rounded-lg border"
+                attachment={att}
+                projectId={projectId}
+                className="max-h-[200px] max-w-full rounded-lg border cursor-pointer"
+                onClick={() => openAttachmentViewer(att)}
               />
             ) : (
               <span
                 key={att.id}
-                className="inline-flex items-center gap-1 px-2 py-1 rounded bg-muted text-xs text-muted-foreground"
+                className="inline-flex items-center gap-1 px-2 py-1 rounded bg-muted text-xs text-muted-foreground cursor-pointer hover:bg-muted/80"
+                onClick={() => openAttachmentViewer(att)}
               >
                 <FileText className="h-3 w-3" />
                 {att.filename}

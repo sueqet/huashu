@@ -7,6 +7,7 @@ export type {
   ApiProvider,
   ModelConfig,
   EmbeddingConfig,
+  ImageGenerationConfig,
 } from "./config";
 export type {
   StoryConfig,

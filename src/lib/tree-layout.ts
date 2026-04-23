@@ -109,6 +109,7 @@ function buildLayoutTree(
 
 export interface ChatNodeData {
   chatNode: ChatNode;
+  projectId: string;
   isCollapsed: boolean;
   hasChildren: boolean;
   batchIndex?: number | null;
@@ -121,7 +122,8 @@ export interface ChatNodeData {
 export function computeTreeLayout(
   nodes: Record<string, ChatNode>,
   rootNodeIds: string[],
-  collapsedIds: Set<string>
+  collapsedIds: Set<string>,
+  projectId: string
 ): { flowNodes: FlowNode<ChatNodeData>[]; flowEdges: Edge[] } {
   const flowNodes: FlowNode<ChatNodeData>[] = [];
   const flowEdges: Edge[] = [];
@@ -160,6 +162,7 @@ export function computeTreeLayout(
         position: { x: layoutNode.x, y: layoutNode.y },
         data: {
           chatNode,
+          projectId,
           isCollapsed: collapsedIds.has(layoutNode.id),
           hasChildren: chatNode.childrenIds.length > 0,
         },

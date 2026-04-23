@@ -1,13 +1,17 @@
 import { useMemo, useState, useRef, useEffect, useCallback } from "react";
-import type { Conversation, ChatNode } from "@/types";
+import type { Conversation, ChatNode, Attachment } from "@/types";
 import { useConversationStore } from "@/stores/conversation-store";
 import { useEditStore } from "@/stores/edit-store";
 import { useConfigStore } from "@/stores/config-store";
 import { useProjectStore } from "@/stores/project-store";
-import { conversationService, buildContext, streamChatCompletion } from "@/services";
+import { conversationService, buildContext, streamChatCompletion, generateImage } from "@/services";
 import { searchKnowledge } from "@/services/rag-service";
+import { attachmentService } from "@/services/attachment-service";
 import { useAttachments } from "@/hooks/useAttachments";
+import { useDragDrop } from "@/hooks/useDragDrop";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
+import { AttachmentImage } from "@/components/ui/attachment-image";
+import { AttachmentViewerSheet } from "@/components/ui/attachment-viewer";
 import { Button } from "@/components/ui/button";
 import {
   X,
@@ -24,6 +28,7 @@ import {
   ImageIcon,
   FileText,
   Paperclip,
+  Wand2,
 } from "lucide-react";
 import {
   Tooltip,
@@ -81,9 +86,14 @@ export function ChatPanel({
     handlePaste,
     pickImages,
     pickDocuments,
+    addFiles,
     removeAttachment,
     clearAttachments,
-  } = useAttachments();
+  } = useAttachments(conversation.projectId, conversation.id);
+
+  const { isDragging, dragHandlers } = useDragDrop({
+    onFiles: addFiles,
+  });
 
   const messages = useMemo(
     () => traceMessages(conversation.nodes, selectedNodeId),
@@ -167,6 +177,7 @@ export function ChatPanel({
     const context = await buildContext({
       nodes: freshNodes,
       currentNodeId: targetNodeId,
+      projectId: conversation.projectId,
       projectDescription: project?.description,
       ragContext,
       maxTokens: activeProvider.maxContextTokens,
@@ -190,6 +201,40 @@ export function ChatPanel({
         onToken: (token) => {
           fullContent += token;
           setStreamingContent(fullContent);
+        },
+        onImage: async (image) => {
+          try {
+            const attId = crypto.randomUUID();
+            const isDataUrl = image.url.startsWith("data:");
+            const mimeType = isDataUrl ? image.url.split(";")[0].split(":")[1] : "image/png";
+            const ext = mimeType.split("/")[1] || "png";
+            const filePath = `${conversation.id}/${attId}.${ext}`;
+
+            const attachment: Attachment = {
+              id: attId,
+              type: "image",
+              filename: `inline_${Date.now()}.${ext}`,
+              mimeType,
+              filePath,
+              size: 0,
+              data: image.url,
+            };
+
+            await attachmentService.saveAttachment(conversation.projectId, conversation.id, attachment);
+
+            const freshConv = useConversationStore.getState().conversation;
+            if (freshConv) {
+              const node = freshConv.nodes[aiNode.id];
+              if (node) {
+                const existingAtts = node.attachments || [];
+                await updateNodeAndSave(aiNode.id, {
+                  attachments: [...existingAtts, attachmentService.stripAttachmentData(attachment)],
+                });
+              }
+            }
+          } catch (err) {
+            console.warn("保存内联图片失败:", err);
+          }
         },
         onDone: async (content) => {
           await updateNodeAndSave(aiNode.id, {
@@ -247,6 +292,75 @@ export function ChatPanel({
   const handleStop = useCallback(() => {
     abortControllerRef.current?.abort();
   }, []);
+
+  // 图片生成
+  const handleGenerateImage = useCallback(async () => {
+    if (!activeProvider || !activeProvider.imageGeneration) return;
+    const prompt = inputText.trim();
+    if (!prompt) return;
+
+    const imgConfig = activeProvider.imageGeneration;
+    setIsGenerating(true);
+    setError(null);
+
+    try {
+      const userNode = conversationService.createNode(
+        conversation.id,
+        "user",
+        prompt,
+        selectedNodeId
+      );
+      await addNodeAndSave(userNode);
+      setInputText("");
+      onSelectNode(userNode.id);
+
+      const result = await generateImage(
+        imgConfig.apiUrl || activeProvider.apiUrl,
+        activeProvider.apiKey,
+        imgConfig.model,
+        prompt,
+        imgConfig.size
+      );
+
+      const attId = crypto.randomUUID();
+      const filePath = `${conversation.id}/${attId}.png`;
+      const dataUrl = result.b64_json
+        ? `data:image/png;base64,${result.b64_json}`
+        : result.url || "";
+
+      if (!dataUrl) throw new Error("图片生成 API 未返回图片数据");
+
+      const attachment: Attachment = {
+        id: attId,
+        type: "image",
+        filename: `generated_${Date.now()}.png`,
+        mimeType: "image/png",
+        filePath,
+        size: result.b64_json?.length || 0,
+        data: dataUrl,
+      };
+
+      await attachmentService.saveAttachment(conversation.projectId, conversation.id, attachment);
+
+      const aiContent = result.revised_prompt
+        ? `*生成提示词: ${result.revised_prompt}*`
+        : "已生成图片";
+      const aiNode = conversationService.createNode(
+        conversation.id,
+        "assistant",
+        aiContent,
+        userNode.id
+      );
+      aiNode.modelName = imgConfig.model;
+      aiNode.attachments = [attachmentService.stripAttachmentData(attachment)];
+      await addNodeAndSave(aiNode);
+      onSelectNode(aiNode.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [activeProvider, inputText, conversation.id, conversation.projectId, selectedNodeId, addNodeAndSave, onSelectNode]);
 
   // 重新生成（在当前节点的父节点下创建新分支）
   const handleRegenerate = useCallback(async () => {
@@ -318,6 +432,7 @@ export function ChatPanel({
             hasChildren={msg.childrenIds.length > 0}
             isCollapsed={collapsedIds.has(msg.id)}
             isEditMode={true}
+            projectId={conversation.projectId}
             autoEdit={
               msg === messages[messages.length - 1] &&
               msg.role === "user" &&
@@ -401,7 +516,16 @@ export function ChatPanel({
       )}
 
       {/* 输入区域 */}
-      <div className="border-t p-3">
+      <div className="border-t p-3 relative" {...dragHandlers}>
+        {/* 拖拽覆盖层 */}
+        {isDragging && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-primary/10 backdrop-blur-sm border-2 border-dashed border-primary/50 rounded-lg">
+            <div className="flex flex-col items-center gap-2 text-primary">
+              <ImageIcon className="h-6 w-6" />
+              <span className="text-sm font-medium">拖放图片或文档到这里</span>
+            </div>
+          </div>
+        )}
         {/* 附件预览 */}
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-2 mb-2">
@@ -411,9 +535,9 @@ export function ChatPanel({
                 className="relative group/att flex items-center gap-1.5 px-2 py-1 rounded-lg border bg-muted/50 text-xs"
               >
                 {att.type === "image" ? (
-                  <img
-                    src={att.data}
-                    alt={att.filename}
+                  <AttachmentImage
+                    attachment={att}
+                    projectId={conversation.projectId}
                     className="h-8 w-8 object-cover rounded"
                   />
                 ) : (
@@ -466,6 +590,24 @@ export function ChatPanel({
                 <TooltipContent side="top"><p>上传文档</p></TooltipContent>
               </Tooltip>
             </TooltipProvider>
+            {activeProvider?.imageGeneration && (
+              <TooltipProvider delayDuration={300}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={handleGenerateImage}
+                      disabled={isGenerating || !inputText.trim()}
+                    >
+                      <Wand2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top"><p>生成图片</p></TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
           </div>
           <textarea
             value={inputText}
@@ -491,9 +633,10 @@ export function ChatPanel({
           </Button>
         </div>
         <p className="text-[10px] text-muted-foreground mt-1">
-          Enter 发送，Shift+Enter 换行，Ctrl+V 粘贴图片
+          Enter 发送，Shift+Enter 换行，Ctrl+V 粘贴图片，拖拽上传
         </p>
       </div>
+      <AttachmentViewerSheet />
     </div>
   );
 }
@@ -506,6 +649,7 @@ interface MessageBubbleProps {
   hasChildren: boolean;
   isCollapsed: boolean;
   isEditMode: boolean;
+  projectId: string;
   autoEdit?: boolean;
   onToggleCollapse: () => void;
   onTogglePin: () => void;
@@ -520,6 +664,7 @@ function MessageBubble({
   hasChildren,
   isCollapsed,
   isEditMode,
+  projectId,
   autoEdit,
   onToggleCollapse,
   onTogglePin,
@@ -527,6 +672,13 @@ function MessageBubble({
   onEditContent,
   onEditSaved,
 }: MessageBubbleProps) {
+  const openAttachmentViewer = useCallback((att: Attachment) => {
+    window.dispatchEvent(
+      new CustomEvent("open-attachment-viewer", {
+        detail: { attachment: att, projectId },
+      })
+    );
+  }, [projectId]);
   const isUser = node.role === "user";
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState("");
@@ -690,16 +842,18 @@ function MessageBubble({
         <div className="flex flex-wrap gap-2 mb-1.5">
           {nodeAttachments.map((att) =>
             att.type === "image" ? (
-              <img
+              <AttachmentImage
                 key={att.id}
-                src={att.data}
-                alt={att.filename}
-                className="max-h-[120px] max-w-full rounded border"
+                attachment={att}
+                projectId={projectId}
+                className="max-h-[120px] max-w-full rounded border cursor-pointer"
+                onClick={() => openAttachmentViewer(att)}
               />
             ) : (
               <span
                 key={att.id}
-                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted text-[10px] text-muted-foreground"
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted text-[10px] text-muted-foreground cursor-pointer hover:bg-muted/80"
+                onClick={() => openAttachmentViewer(att)}
               >
                 <FileText className="h-2.5 w-2.5" />
                 {att.filename}
