@@ -1,6 +1,6 @@
 [package]
 name = "huashu"
-version = "0.2.0"
+version = "0.3.0"
 description = "话树 - 基于树状结构的AI对话管理桌面应用"
 authors = ["you"]
 edition = "2021"
