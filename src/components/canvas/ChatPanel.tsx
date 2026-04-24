@@ -4,15 +4,23 @@ import { useConversationStore } from "@/stores/conversation-store";
 import { useEditStore } from "@/stores/edit-store";
 import { useConfigStore } from "@/stores/config-store";
 import { useProjectStore } from "@/stores/project-store";
-import { conversationService, buildContext, streamChatCompletion, generateImage } from "@/services";
+import {
+  conversationService,
+  buildContext,
+  streamChatCompletion,
+  generateImage,
+  resolveGeneratedImageDataUrl,
+} from "@/services";
 import { searchKnowledge } from "@/services/rag-service";
 import { attachmentService } from "@/services/attachment-service";
+import { buildImagePromptFromContext } from "@/services/image-prompt-service";
 import { useAttachments } from "@/hooks/useAttachments";
 import { useDragDrop } from "@/hooks/useDragDrop";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
 import { AttachmentImage } from "@/components/ui/attachment-image";
 import { AttachmentViewerSheet } from "@/components/ui/attachment-viewer";
 import { Button } from "@/components/ui/button";
+import { ImagePromptDialog } from "./ImagePromptDialog";
 import {
   X,
   Send,
@@ -75,6 +83,8 @@ export function ChatPanel({
   const projects = useProjectStore((s) => s.projects);
 
   const [inputText, setInputText] = useState("");
+  const [imagePromptDialogOpen, setImagePromptDialogOpen] = useState(false);
+  const [imagePromptDraft, setImagePromptDraft] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [streamingContent, setStreamingContent] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -83,12 +93,15 @@ export function ChatPanel({
 
   const {
     attachments,
+    isProcessing: isProcessingAttachments,
+    processingError,
     handlePaste,
     pickImages,
     pickDocuments,
     addFiles,
     removeAttachment,
     clearAttachments,
+    clearProcessingError,
   } = useAttachments(conversation.projectId, conversation.id);
 
   const { isDragging, dragHandlers } = useDragDrop({
@@ -203,6 +216,7 @@ export function ChatPanel({
           setStreamingContent(fullContent);
         },
         onImage: async (image) => {
+          return;
           try {
             const attId = crypto.randomUUID();
             const isDataUrl = image.url.startsWith("data:");
@@ -222,7 +236,7 @@ export function ChatPanel({
 
             await attachmentService.saveAttachment(conversation.projectId, conversation.id, attachment);
 
-            const freshConv = useConversationStore.getState().conversation;
+            const freshConv = useConversationStore.getState().conversation!;
             if (freshConv) {
               const node = freshConv.nodes[aiNode.id];
               if (node) {
@@ -273,20 +287,55 @@ export function ChatPanel({
   // 发送消息（自动触发 AI 生成）
   const handleSend = useCallback(async () => {
     if (!inputText.trim() && attachments.length === 0) return;
+
+    const content = inputText.trim();
+    const nextAttachments = attachments.length > 0 ? [...attachments] : undefined;
+    const canReuseCurrentNode =
+      currentNode?.role === "user" &&
+      !currentNode.content.trim() &&
+      (!currentNode.attachments || currentNode.attachments.length === 0) &&
+      currentNode.childrenIds.length === 0;
+
+    if (canReuseCurrentNode) {
+      await updateNodeAndSave(currentNode.id, {
+        content,
+        attachments: nextAttachments,
+        isUserEdited: true,
+      });
+      setInputText("");
+      clearAttachments();
+      clearProcessingError();
+      handleGenerate(currentNode.id);
+      return;
+    }
+
     const node = conversationService.createNode(
       conversation.id,
       "user",
-      inputText.trim(),
+      content,
       selectedNodeId,
-      attachments.length > 0 ? [...attachments] : undefined
+      nextAttachments
     );
     await addNodeAndSave(node);
     setInputText("");
     clearAttachments();
+    clearProcessingError();
     onSelectNode(node.id);
     // 自动生成 AI 回复
     handleGenerate(node.id);
-  }, [inputText, attachments, conversation.id, selectedNodeId, addNodeAndSave, onSelectNode, clearAttachments, handleGenerate]);
+  }, [
+    inputText,
+    attachments,
+    currentNode,
+    conversation.id,
+    selectedNodeId,
+    addNodeAndSave,
+    updateNodeAndSave,
+    onSelectNode,
+    clearAttachments,
+    clearProcessingError,
+    handleGenerate,
+  ]);
 
   // 中断生成
   const handleStop = useCallback(() => {
@@ -294,14 +343,32 @@ export function ChatPanel({
   }, []);
 
   // 图片生成
-  const handleGenerateImage = useCallback(async () => {
+  const handleGenerateImage = useCallback(() => {
     if (!activeProvider || !activeProvider.imageGeneration) return;
-    const prompt = inputText.trim();
+    const latestConv = useConversationStore.getState().conversation || conversation;
+    const prompt = buildImagePromptFromContext(
+      latestConv.nodes,
+      selectedNodeId,
+      inputText
+    );
     if (!prompt) return;
+
+    setImagePromptDraft(prompt);
+    setImagePromptDialogOpen(true);
+  }, [activeProvider, conversation, selectedNodeId, inputText]);
+
+  const confirmGenerateImage = useCallback(async () => {
+    if (!activeProvider || !activeProvider.imageGeneration) return;
+    const prompt = imagePromptDraft.trim();
+    if (!prompt) return;
+
+    setImagePromptDialogOpen(false);
 
     const imgConfig = activeProvider.imageGeneration;
     setIsGenerating(true);
     setError(null);
+
+    let imageNodeId: string | null = null;
 
     try {
       const userNode = conversationService.createNode(
@@ -314,9 +381,21 @@ export function ChatPanel({
       setInputText("");
       onSelectNode(userNode.id);
 
+      const aiNode = conversationService.createNode(
+        conversation.id,
+        "assistant",
+        "Generating image...",
+        userNode.id
+      );
+      aiNode.isPartial = true;
+      aiNode.modelName = imgConfig.model;
+      await addNodeAndSave(aiNode);
+      imageNodeId = aiNode.id;
+      onSelectNode(aiNode.id);
+
       const result = await generateImage(
         imgConfig.apiUrl || activeProvider.apiUrl,
-        activeProvider.apiKey,
+        imgConfig.apiKey || activeProvider.apiKey,
         imgConfig.model,
         prompt,
         imgConfig.size
@@ -324,9 +403,7 @@ export function ChatPanel({
 
       const attId = crypto.randomUUID();
       const filePath = `${conversation.id}/${attId}.png`;
-      const dataUrl = result.b64_json
-        ? `data:image/png;base64,${result.b64_json}`
-        : result.url || "";
+      const dataUrl = await resolveGeneratedImageDataUrl(result);
 
       if (!dataUrl) throw new Error("图片生成 API 未返回图片数据");
 
@@ -345,22 +422,25 @@ export function ChatPanel({
       const aiContent = result.revised_prompt
         ? `*生成提示词: ${result.revised_prompt}*`
         : "已生成图片";
-      const aiNode = conversationService.createNode(
-        conversation.id,
-        "assistant",
-        aiContent,
-        userNode.id
-      );
-      aiNode.modelName = imgConfig.model;
-      aiNode.attachments = [attachmentService.stripAttachmentData(attachment)];
-      await addNodeAndSave(aiNode);
+      await updateNodeAndSave(aiNode.id, {
+        content: aiContent,
+        isPartial: false,
+        attachments: [attachmentService.stripAttachmentData(attachment)],
+      });
       onSelectNode(aiNode.id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      if (imageNodeId) {
+        await updateNodeAndSave(imageNodeId, {
+          content: `Image generation failed: ${message}`,
+          isPartial: false,
+        });
+      }
     } finally {
       setIsGenerating(false);
     }
-  }, [activeProvider, inputText, conversation.id, conversation.projectId, selectedNodeId, addNodeAndSave, onSelectNode]);
+  }, [activeProvider, imagePromptDraft, conversation, selectedNodeId, addNodeAndSave, updateNodeAndSave, onSelectNode]);
 
   // 重新生成（在当前节点的父节点下创建新分支）
   const handleRegenerate = useCallback(async () => {
@@ -384,10 +464,10 @@ export function ChatPanel({
     [conversation, updateNodeAndSave, takeSnapshot]
   );
 
-  const handleEditSaved = useCallback((nodeId: string) => {
+  const handleEditSaved = useCallback(async (nodeId: string) => {
     const currentConfig = useConfigStore.getState().config;
     if (currentConfig?.autoGenerateOnEnter !== false) {
-      handleGenerate(nodeId);
+      await handleGenerate(nodeId);
     }
   }, [handleGenerate]);
 
@@ -406,7 +486,26 @@ export function ChatPanel({
     currentNode?.role === "user" && !isGenerating && !!activeProvider;
 
   return (
-    <div className="w-[400px] border-l bg-background flex flex-col">
+    <div
+      className="relative w-[400px] border-l bg-background flex flex-col"
+      {...dragHandlers}
+    >
+      <ImagePromptDialog
+        open={imagePromptDialogOpen}
+        prompt={imagePromptDraft}
+        onPromptChange={setImagePromptDraft}
+        onCancel={() => setImagePromptDialogOpen(false)}
+        onConfirm={confirmGenerateImage}
+        isGenerating={isGenerating}
+      />
+      {isDragging && (
+        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-primary/10 backdrop-blur-sm border-2 border-dashed border-primary/50 rounded-lg">
+          <div className="flex flex-col items-center gap-2 text-primary">
+            <ImageIcon className="h-8 w-8" />
+            <span className="text-sm font-medium">拖放图片或文档到这里</span>
+          </div>
+        </div>
+      )}
       {/* 面板头部 */}
       <div className="flex items-center justify-between px-4 py-2 border-b">
         <div className="flex items-center gap-2">
@@ -516,16 +615,7 @@ export function ChatPanel({
       )}
 
       {/* 输入区域 */}
-      <div className="border-t p-3 relative" {...dragHandlers}>
-        {/* 拖拽覆盖层 */}
-        {isDragging && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-primary/10 backdrop-blur-sm border-2 border-dashed border-primary/50 rounded-lg">
-            <div className="flex flex-col items-center gap-2 text-primary">
-              <ImageIcon className="h-6 w-6" />
-              <span className="text-sm font-medium">拖放图片或文档到这里</span>
-            </div>
-          </div>
-        )}
+      <div className="border-t p-3 relative">
         {/* 附件预览 */}
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-2 mb-2">
@@ -556,6 +646,15 @@ export function ChatPanel({
             ))}
           </div>
         )}
+        {isProcessingAttachments && (
+          <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            <span>正在处理附件...</span>
+          </div>
+        )}
+        {processingError && (
+          <div className="mb-2 text-xs text-destructive">{processingError}</div>
+        )}
         <div className="flex gap-2">
           <div className="flex items-end gap-0.5">
             <TooltipProvider delayDuration={300}>
@@ -566,7 +665,7 @@ export function ChatPanel({
                     size="icon"
                     className="h-8 w-8"
                     onClick={pickImages}
-                    disabled={isGenerating}
+                    disabled={isGenerating || isProcessingAttachments}
                   >
                     <ImageIcon className="h-3.5 w-3.5" />
                   </Button>
@@ -582,7 +681,7 @@ export function ChatPanel({
                     size="icon"
                     className="h-8 w-8"
                     onClick={pickDocuments}
-                    disabled={isGenerating}
+                    disabled={isGenerating || isProcessingAttachments}
                   >
                     <FileText className="h-3.5 w-3.5" />
                   </Button>
@@ -595,13 +694,18 @@ export function ChatPanel({
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 px-2"
                       onClick={handleGenerateImage}
-                      disabled={isGenerating || !inputText.trim()}
+                      disabled={
+                        isGenerating ||
+                        isProcessingAttachments ||
+                        false
+                      }
                     >
-                      <Wand2 className="h-3.5 w-3.5" />
+                      <Wand2 className="h-3.5 w-3.5 mr-1" />
+                      <span className="text-[11px]">生图</span>
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent side="top"><p>生成图片</p></TooltipContent>
@@ -615,7 +719,7 @@ export function ChatPanel({
             onPaste={handlePaste}
             placeholder="输入消息...（可粘贴图片）"
             className="flex-1 min-h-[60px] max-h-[150px] p-2 border rounded-md bg-background text-sm resize-y outline-none focus:ring-1 focus:ring-ring"
-            disabled={isGenerating}
+            disabled={isGenerating || isProcessingAttachments}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
@@ -627,7 +731,11 @@ export function ChatPanel({
             size="icon"
             className="self-end h-9 w-9"
             onClick={handleSend}
-            disabled={(!inputText.trim() && attachments.length === 0) || isGenerating}
+            disabled={
+              (!inputText.trim() && attachments.length === 0) ||
+              isGenerating ||
+              isProcessingAttachments
+            }
           >
             <Send className="h-4 w-4" />
           </Button>
@@ -654,8 +762,8 @@ interface MessageBubbleProps {
   onToggleCollapse: () => void;
   onTogglePin: () => void;
   onToggleStar: () => void;
-  onEditContent: (newContent: string) => void;
-  onEditSaved?: (nodeId: string) => void;
+  onEditContent: (newContent: string) => Promise<void> | void;
+  onEditSaved?: (nodeId: string) => Promise<void> | void;
 }
 
 function MessageBubble({
@@ -710,14 +818,14 @@ function MessageBubble({
   }, [autoEdit]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 保存编辑
-  const saveEdit = useCallback((source: 'enter' | 'blur' = 'blur') => {
+  const saveEdit = useCallback(async (source: 'enter' | 'blur' = 'blur') => {
     if (editText !== node.content) {
-      onEditContent(editText);
+      await onEditContent(editText);
     }
     setIsEditing(false);
     // 仅在 Enter 保存时触发自动生成，失焦不触发
     if (source === 'enter' && editText.trim() && onEditSaved) {
-      onEditSaved(node.id);
+      await onEditSaved(node.id);
     }
   }, [editText, node.content, node.id, onEditContent, onEditSaved]);
 
@@ -732,7 +840,7 @@ function MessageBubble({
     (e: React.KeyboardEvent) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
-        saveEdit('enter');
+        void saveEdit('enter');
       } else if (e.key === "Escape") {
         e.preventDefault();
         cancelEdit();
@@ -871,7 +979,9 @@ function MessageBubble({
             value={editText}
             onChange={(e) => setEditText(e.target.value)}
             onKeyDown={handleEditKeyDown}
-            onBlur={() => saveEdit('blur')}
+            onBlur={() => {
+              void saveEdit('blur');
+            }}
             className="w-full min-h-[60px] max-h-[200px] p-2 border rounded bg-background text-sm resize-y outline-none focus:ring-1 focus:ring-ring"
           />
           <p className="text-[10px] text-muted-foreground">

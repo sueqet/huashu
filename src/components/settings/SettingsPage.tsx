@@ -163,6 +163,10 @@ function ProviderForm({ initial, onSave, onCancel }: ProviderFormProps) {
   const [imgGenApiUrl, setImgGenApiUrl] = useState(
     initial?.imageGeneration?.apiUrl || ""
   );
+  const [imgGenApiKey, setImgGenApiKey] = useState(
+    initial?.imageGeneration?.apiKey || ""
+  );
+  const [showImgGenKey, setShowImgGenKey] = useState(false);
 
   const defaultConfig: ModelConfig = initial?.modelConfig || {
     temperature: 0.7,
@@ -190,6 +194,7 @@ function ProviderForm({ initial, onSave, onCancel }: ProviderFormProps) {
             model: imgGenModel.trim(),
             size: imgGenSize,
             ...(imgGenApiUrl.trim() ? { apiUrl: imgGenApiUrl.trim() } : {}),
+            ...(imgGenApiKey.trim() ? { apiKey: imgGenApiKey.trim() } : {}),
           }
         : undefined;
       await onSave({
@@ -432,6 +437,29 @@ function ProviderForm({ initial, onSave, onCancel }: ProviderFormProps) {
                 placeholder="https://api.openai.com/v1"
                 className="w-full mt-1 px-2 py-1 border rounded text-sm bg-background outline-none"
               />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground">Image API Key</label>
+              <div className="relative mt-1">
+                <input
+                  type={showImgGenKey ? "text" : "password"}
+                  value={imgGenApiKey}
+                  onChange={(e) => setImgGenApiKey(e.target.value)}
+                  placeholder="sk-..."
+                  className="w-full px-2 py-1 pr-9 border rounded text-sm bg-background outline-none"
+                />
+                <button
+                  type="button"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  onClick={() => setShowImgGenKey(!showImgGenKey)}
+                >
+                  {showImgGenKey ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         )}

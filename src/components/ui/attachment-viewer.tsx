@@ -6,21 +6,14 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { FileText, Copy, Check, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-/** 附件查看器事件详情类型 */
 interface AttachmentViewerDetail {
-  /** 附件对象方式 */
   attachment?: Attachment;
   projectId?: string;
-  /** 直接图片方式（markdown img 等） */
   type?: "image";
   src?: string;
   alt?: string;
 }
 
-/**
- * 附件查看器 Sheet
- * 监听 open-attachment-viewer 自定义事件打开
- */
 export function AttachmentViewerSheet() {
   const [open, setOpen] = useState(false);
   const [detail, setDetail] = useState<AttachmentViewerDetail | null>(null);
@@ -34,7 +27,6 @@ export function AttachmentViewerSheet() {
     setDetail(d);
     setOpen(true);
 
-    // 预加载数据
     if (d.attachment && d.projectId) {
       setLoading(true);
       setImageSrc("");
@@ -74,7 +66,7 @@ export function AttachmentViewerSheet() {
       open={open}
       onOpenChange={setOpen}
       size={isImage ? "lg" : "md"}
-      title={filename || "附件预览"}
+      title={filename || "Attachment preview"}
     >
       {loading && (
         <div className="flex items-center justify-center h-48">
@@ -123,7 +115,7 @@ function DocumentViewer({ text, filename }: { text: string; filename: string }) 
         </div>
         <Button variant="ghost" size="sm" onClick={handleCopy}>
           {copied ? <Check className="h-3.5 w-3.5 mr-1" /> : <Copy className="h-3.5 w-3.5 mr-1" />}
-          {copied ? "已复制" : "复制"}
+          {copied ? "Copied" : "Copy"}
         </Button>
       </div>
       <ScrollArea className="flex-1 max-h-[70vh]">

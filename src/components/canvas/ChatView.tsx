@@ -4,9 +4,16 @@ import { useConversationStore } from "@/stores/conversation-store";
 import { useEditStore } from "@/stores/edit-store";
 import { useConfigStore } from "@/stores/config-store";
 import { useProjectStore } from "@/stores/project-store";
-import { conversationService, buildContext, streamChatCompletion, generateImage } from "@/services";
+import {
+  conversationService,
+  buildContext,
+  streamChatCompletion,
+  generateImage,
+  resolveGeneratedImageDataUrl,
+} from "@/services";
 import { searchKnowledge } from "@/services/rag-service";
 import { attachmentService } from "@/services/attachment-service";
+import { buildImagePromptFromContext } from "@/services/image-prompt-service";
 import { useAttachments } from "@/hooks/useAttachments";
 import { useDragDrop } from "@/hooks/useDragDrop";
 import { StoryChoices } from "./StoryChoices";
@@ -22,6 +29,7 @@ import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
 import { AttachmentImage } from "@/components/ui/attachment-image";
 import { AttachmentViewerSheet } from "@/components/ui/attachment-viewer";
 import { Button } from "@/components/ui/button";
+import { ImagePromptDialog } from "./ImagePromptDialog";
 import {
   ArrowLeft,
   Send,
@@ -81,6 +89,8 @@ export function ChatView({
   const projects = useProjectStore((s) => s.projects);
 
   const [inputText, setInputText] = useState("");
+  const [imagePromptDialogOpen, setImagePromptDialogOpen] = useState(false);
+  const [imagePromptDraft, setImagePromptDraft] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [streamingContent, setStreamingContent] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -93,12 +103,15 @@ export function ChatView({
 
   const {
     attachments,
+    isProcessing: isProcessingAttachments,
+    processingError,
     handlePaste,
     pickImages,
     pickDocuments,
     addFiles,
     removeAttachment,
     clearAttachments,
+    clearProcessingError,
   } = useAttachments(conversation.projectId, conversation.id);
 
   const { isDragging, dragHandlers } = useDragDrop({
@@ -345,6 +358,7 @@ export function ChatView({
             setStreamingContent(fullContent);
           },
           onImage: async (image) => {
+            return;
             // 多模态内联图片：创建 Attachment 并保存
             try {
               const attId = crypto.randomUUID();
@@ -366,7 +380,7 @@ export function ChatView({
               await attachmentService.saveAttachment(conversation.projectId, conversation.id, attachment);
 
               // 添加到当前 AI 节点的 attachments
-              const freshConv = useConversationStore.getState().conversation;
+              const freshConv = useConversationStore.getState().conversation!;
               if (freshConv) {
                 const node = freshConv.nodes[aiNode.id];
                 if (node) {
@@ -440,34 +454,87 @@ export function ChatView({
   // 发送消息（自动触发 AI 生成）
   const handleSend = useCallback(async () => {
     if (!inputText.trim() && attachments.length === 0) return;
+
+    const content = inputText.trim();
+    const nextAttachments = attachments.length > 0 ? [...attachments] : undefined;
+    const canReuseCurrentNode =
+      currentNode?.role === "user" &&
+      !currentNode.content.trim() &&
+      (!currentNode.attachments || currentNode.attachments.length === 0) &&
+      currentNode.childrenIds.length === 0;
+
+    if (canReuseCurrentNode) {
+      await updateNodeAndSave(currentNode.id, {
+        content,
+        attachments: nextAttachments,
+        isUserEdited: true,
+      });
+      setInputText("");
+      clearAttachments();
+      clearProcessingError();
+      handleGenerate(currentNode.id);
+      return;
+    }
+
     const node = conversationService.createNode(
       conversation.id,
       "user",
-      inputText.trim(),
+      content,
       selectedNodeId,
-      attachments.length > 0 ? [...attachments] : undefined
+      nextAttachments
     );
     await addNodeAndSave(node);
     setInputText("");
     clearAttachments();
+    clearProcessingError();
     onSelectNode(node.id);
     // 自动生成 AI 回复
     handleGenerate(node.id);
-  }, [inputText, attachments, conversation.id, selectedNodeId, addNodeAndSave, onSelectNode, clearAttachments, handleGenerate]);
+  }, [
+    inputText,
+    attachments,
+    currentNode,
+    conversation.id,
+    selectedNodeId,
+    addNodeAndSave,
+    updateNodeAndSave,
+    onSelectNode,
+    clearAttachments,
+    clearProcessingError,
+    handleGenerate,
+  ]);
 
   const handleStop = useCallback(() => {
     abortControllerRef.current?.abort();
   }, []);
 
   // 图片生成
-  const handleGenerateImage = useCallback(async () => {
+  const handleGenerateImage = useCallback(() => {
     if (!activeProvider || !activeProvider.imageGeneration) return;
-    const prompt = inputText.trim();
+    const latestConv = useConversationStore.getState().conversation || conversation;
+    const prompt = buildImagePromptFromContext(
+      latestConv.nodes,
+      selectedNodeId,
+      inputText
+    );
     if (!prompt) return;
+
+    setImagePromptDraft(prompt);
+    setImagePromptDialogOpen(true);
+  }, [activeProvider, conversation, selectedNodeId, inputText]);
+
+  const confirmGenerateImage = useCallback(async () => {
+    if (!activeProvider || !activeProvider.imageGeneration) return;
+    const prompt = imagePromptDraft.trim();
+    if (!prompt) return;
+
+    setImagePromptDialogOpen(false);
 
     const imgConfig = activeProvider.imageGeneration;
     setIsGenerating(true);
     setError(null);
+
+    let imageNodeId: string | null = null;
 
     try {
       // 创建用户节点（显示 prompt）
@@ -481,10 +548,22 @@ export function ChatView({
       setInputText("");
       onSelectNode(userNode.id);
 
+      const aiNode = conversationService.createNode(
+        conversation.id,
+        "assistant",
+        "Generating image...",
+        userNode.id
+      );
+      aiNode.isPartial = true;
+      aiNode.modelName = imgConfig.model;
+      await addNodeAndSave(aiNode);
+      imageNodeId = aiNode.id;
+      onSelectNode(aiNode.id);
+
       // 调用图片生成 API
       const result = await generateImage(
         imgConfig.apiUrl || activeProvider.apiUrl,
-        activeProvider.apiKey,
+        imgConfig.apiKey || activeProvider.apiKey,
         imgConfig.model,
         prompt,
         imgConfig.size
@@ -494,9 +573,7 @@ export function ChatView({
       const attId = crypto.randomUUID();
       const ext = "png";
       const filePath = `${conversation.id}/${attId}.${ext}`;
-      const dataUrl = result.b64_json
-        ? `data:image/png;base64,${result.b64_json}`
-        : result.url || "";
+      const dataUrl = await resolveGeneratedImageDataUrl(result);
 
       if (!dataUrl) throw new Error("图片生成 API 未返回图片数据");
 
@@ -517,22 +594,25 @@ export function ChatView({
       const aiContent = result.revised_prompt
         ? `*生成提示词: ${result.revised_prompt}*`
         : "已生成图片";
-      const aiNode = conversationService.createNode(
-        conversation.id,
-        "assistant",
-        aiContent,
-        userNode.id
-      );
-      aiNode.modelName = imgConfig.model;
-      aiNode.attachments = [attachmentService.stripAttachmentData(attachment)];
-      await addNodeAndSave(aiNode);
+      await updateNodeAndSave(aiNode.id, {
+        content: aiContent,
+        isPartial: false,
+        attachments: [attachmentService.stripAttachmentData(attachment)],
+      });
       onSelectNode(aiNode.id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      if (imageNodeId) {
+        await updateNodeAndSave(imageNodeId, {
+          content: `Image generation failed: ${message}`,
+          isPartial: false,
+        });
+      }
     } finally {
       setIsGenerating(false);
     }
-  }, [activeProvider, inputText, conversation.id, conversation.projectId, selectedNodeId, addNodeAndSave, onSelectNode]);
+  }, [activeProvider, imagePromptDraft, conversation, selectedNodeId, addNodeAndSave, updateNodeAndSave, onSelectNode]);
 
   const handleRegenerate = useCallback(async () => {
     if (!currentNode || currentNode.role !== "assistant") return;
@@ -554,10 +634,10 @@ export function ChatView({
     [conversation, updateNodeAndSave, takeSnapshot]
   );
 
-  const handleEditSaved = useCallback((nodeId: string) => {
+  const handleEditSaved = useCallback(async (nodeId: string) => {
     const currentConfig = useConfigStore.getState().config;
     if (currentConfig?.autoGenerateOnEnter !== false) {
-      handleGenerate(nodeId);
+      await handleGenerate(nodeId);
     }
   }, [handleGenerate]);
 
@@ -605,7 +685,26 @@ export function ChatView({
   );
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden bg-background">
+    <div
+      className="relative flex-1 flex flex-col overflow-hidden bg-background"
+      {...dragHandlers}
+    >
+      <ImagePromptDialog
+        open={imagePromptDialogOpen}
+        prompt={imagePromptDraft}
+        onPromptChange={setImagePromptDraft}
+        onCancel={() => setImagePromptDialogOpen(false)}
+        onConfirm={confirmGenerateImage}
+        isGenerating={isGenerating}
+      />
+      {isDragging && (
+        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-primary/10 backdrop-blur-sm border-2 border-dashed border-primary/50 rounded-lg">
+          <div className="flex flex-col items-center gap-2 text-primary">
+            <ImageIcon className="h-10 w-10" />
+            <span className="text-sm font-medium">拖放图片或文档到这里</span>
+          </div>
+        </div>
+      )}
       {/* 顶部栏 */}
       <div className="flex items-center gap-3 px-4 py-3 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <Button
@@ -776,16 +875,7 @@ export function ChatView({
       )}
 
       {/* 输入区域 */}
-      <div className="border-t bg-background relative" {...dragHandlers}>
-        {/* 拖拽覆盖层 */}
-        {isDragging && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-primary/10 backdrop-blur-sm border-2 border-dashed border-primary/50 rounded-lg">
-            <div className="flex flex-col items-center gap-2 text-primary">
-              <ImageIcon className="h-8 w-8" />
-              <span className="text-sm font-medium">拖放图片或文档到这里</span>
-            </div>
-          </div>
-        )}
+      <div className="border-t bg-background relative">
         <div className="max-w-3xl mx-auto p-4">
           {/* 附件预览 */}
           {attachments.length > 0 && (
@@ -817,6 +907,15 @@ export function ChatView({
               ))}
             </div>
           )}
+          {isProcessingAttachments && (
+            <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <span>正在处理附件...</span>
+            </div>
+          )}
+          {processingError && (
+            <div className="mb-2 text-xs text-destructive">{processingError}</div>
+          )}
           <div className="flex gap-2">
             <div className="flex items-end gap-1">
               <TooltipProvider delayDuration={300}>
@@ -827,7 +926,7 @@ export function ChatView({
                       size="icon"
                       className="h-9 w-9"
                       onClick={pickImages}
-                      disabled={isGenerating}
+                      disabled={isGenerating || isProcessingAttachments}
                     >
                       <ImageIcon className="h-4 w-4" />
                     </Button>
@@ -843,7 +942,7 @@ export function ChatView({
                       size="icon"
                       className="h-9 w-9"
                       onClick={pickDocuments}
-                      disabled={isGenerating}
+                      disabled={isGenerating || isProcessingAttachments}
                     >
                       <FileText className="h-4 w-4" />
                     </Button>
@@ -855,14 +954,19 @@ export function ChatView({
                 <TooltipProvider delayDuration={300}>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-9 w-9"
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-9 px-2"
                         onClick={handleGenerateImage}
-                        disabled={isGenerating || !inputText.trim()}
+                        disabled={
+                          isGenerating ||
+                          isProcessingAttachments ||
+                          false
+                        }
                       >
-                        <Wand2 className="h-4 w-4" />
+                        <Wand2 className="h-4 w-4 mr-1" />
+                        <span className="text-xs">生图</span>
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent side="top"><p>生成图片</p></TooltipContent>
@@ -877,7 +981,7 @@ export function ChatView({
               onPaste={handlePaste}
               placeholder="输入消息...（可粘贴图片）"
               className="flex-1 min-h-[60px] max-h-[150px] p-3 border rounded-xl bg-background text-sm resize-y outline-none focus:ring-2 focus:ring-ring"
-              disabled={isGenerating}
+              disabled={isGenerating || isProcessingAttachments}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
@@ -894,7 +998,11 @@ export function ChatView({
               size="icon"
               className="self-end h-10 w-10 rounded-xl"
               onClick={handleSend}
-              disabled={(!inputText.trim() && attachments.length === 0) || isGenerating}
+              disabled={
+                (!inputText.trim() && attachments.length === 0) ||
+                isGenerating ||
+                isProcessingAttachments
+              }
             >
               <Send className="h-4 w-4" />
             </Button>
@@ -918,8 +1026,8 @@ interface ChatBubbleProps {
   autoEdit?: boolean;
   onTogglePin: () => void;
   onToggleStar: () => void;
-  onEditContent: (newContent: string) => void;
-  onEditSaved?: (nodeId: string) => void;
+  onEditContent: (newContent: string) => Promise<void> | void;
+  onEditSaved?: (nodeId: string) => Promise<void> | void;
 }
 
 function ChatBubble({
@@ -965,14 +1073,14 @@ function ChatBubble({
     }
   }, [autoEdit]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const saveEdit = useCallback((source: 'enter' | 'blur' = 'blur') => {
+  const saveEdit = useCallback(async (source: 'enter' | 'blur' = 'blur') => {
     if (editText !== node.content) {
-      onEditContent(editText);
+      await onEditContent(editText);
     }
     setIsEditing(false);
     // 仅在 Enter 保存时触发自动生成，失焦不触发
     if (source === 'enter' && editText.trim() && onEditSaved) {
-      onEditSaved(node.id);
+      await onEditSaved(node.id);
     }
   }, [editText, node.content, node.id, onEditContent, onEditSaved]);
 
@@ -985,7 +1093,7 @@ function ChatBubble({
     (e: React.KeyboardEvent) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
-        saveEdit('enter');
+        void saveEdit('enter');
       } else if (e.key === "Escape") {
         e.preventDefault();
         cancelEdit();
@@ -1107,7 +1215,9 @@ function ChatBubble({
             value={editText}
             onChange={(e) => setEditText(e.target.value)}
             onKeyDown={handleEditKeyDown}
-            onBlur={() => saveEdit('blur')}
+            onBlur={() => {
+              void saveEdit('blur');
+            }}
             className="w-full min-h-[80px] max-h-[300px] p-3 border rounded-lg bg-background text-sm resize-y outline-none focus:ring-1 focus:ring-ring"
           />
           <p className="text-[10px] text-muted-foreground">
