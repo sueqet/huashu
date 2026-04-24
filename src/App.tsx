@@ -98,7 +98,11 @@ function App() {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden">
-      <Sidebar onNavigate={handleNavigate} currentView={currentView} />
+      <Sidebar
+        onNavigate={handleNavigate}
+        currentView={currentView}
+        selectedProjectId={selectedProjectId}
+      />
       <MainContent
         currentView={currentView}
         selectedProjectId={selectedProjectId}

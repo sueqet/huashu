@@ -4,6 +4,58 @@ export interface ImageGenerationResult {
   revised_prompt?: string;
 }
 
+export interface ImageGenerationRequestConfig {
+  apiUrl: string;
+  apiKey: string;
+  model: string;
+  size: string;
+}
+
+export function getImageGenerationConfig(provider: {
+  apiUrl: string;
+  apiKey: string;
+  defaultModel?: string;
+  imageGeneration?: {
+    apiUrl?: string;
+    apiKey?: string;
+    model?: string;
+    size?: string;
+  };
+}): ImageGenerationRequestConfig | null {
+  const model = provider.imageGeneration?.model?.trim() || provider.defaultModel?.trim();
+  if (!model) return null;
+
+  return {
+    apiUrl: provider.imageGeneration?.apiUrl?.trim() || provider.apiUrl,
+    apiKey: provider.imageGeneration?.apiKey?.trim() || provider.apiKey,
+    model,
+    size: provider.imageGeneration?.size || "1024x1024",
+  };
+}
+
+function supportsResponseFormat(model: string): boolean {
+  return !model.toLowerCase().startsWith("gpt-image-");
+}
+
+function createImageGenerationBody(
+  model: string,
+  prompt: string,
+  size: string
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    model,
+    prompt,
+    n: 1,
+    size,
+  };
+
+  if (supportsResponseFormat(model)) {
+    body.response_format = "b64_json";
+  }
+
+  return body;
+}
+
 function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -49,13 +101,7 @@ export async function generateImage(
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({
-      model,
-      prompt,
-      n: 1,
-      size,
-      response_format: "b64_json",
-    }),
+    body: JSON.stringify(createImageGenerationBody(model, prompt, size)),
     signal,
   });
 

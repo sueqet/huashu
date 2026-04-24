@@ -9,6 +9,7 @@ import {
   buildContext,
   streamChatCompletion,
   generateImage,
+  getImageGenerationConfig,
   resolveGeneratedImageDataUrl,
 } from "@/services";
 import { searchKnowledge } from "@/services/rag-service";
@@ -121,6 +122,9 @@ export function ChatPanel({
     (p) => p.id === config.activeProviderId
   );
   const activeModel = config?.activeModel || activeProvider?.defaultModel;
+  const imageGenerationConfig = activeProvider
+    ? getImageGenerationConfig(activeProvider)
+    : null;
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -344,7 +348,7 @@ export function ChatPanel({
 
   // 图片生成
   const handleGenerateImage = useCallback(() => {
-    if (!activeProvider || !activeProvider.imageGeneration) return;
+    if (!imageGenerationConfig) return;
     const latestConv = useConversationStore.getState().conversation || conversation;
     const prompt = buildImagePromptFromContext(
       latestConv.nodes,
@@ -355,16 +359,16 @@ export function ChatPanel({
 
     setImagePromptDraft(prompt);
     setImagePromptDialogOpen(true);
-  }, [activeProvider, conversation, selectedNodeId, inputText]);
+  }, [imageGenerationConfig, conversation, selectedNodeId, inputText]);
 
   const confirmGenerateImage = useCallback(async () => {
-    if (!activeProvider || !activeProvider.imageGeneration) return;
+    if (!imageGenerationConfig) return;
     const prompt = imagePromptDraft.trim();
     if (!prompt) return;
 
     setImagePromptDialogOpen(false);
 
-    const imgConfig = activeProvider.imageGeneration;
+    const imgConfig = imageGenerationConfig;
     setIsGenerating(true);
     setError(null);
 
@@ -394,8 +398,8 @@ export function ChatPanel({
       onSelectNode(aiNode.id);
 
       const result = await generateImage(
-        imgConfig.apiUrl || activeProvider.apiUrl,
-        imgConfig.apiKey || activeProvider.apiKey,
+        imgConfig.apiUrl,
+        imgConfig.apiKey,
         imgConfig.model,
         prompt,
         imgConfig.size
@@ -440,7 +444,7 @@ export function ChatPanel({
     } finally {
       setIsGenerating(false);
     }
-  }, [activeProvider, imagePromptDraft, conversation, selectedNodeId, addNodeAndSave, updateNodeAndSave, onSelectNode]);
+  }, [imageGenerationConfig, imagePromptDraft, conversation, selectedNodeId, addNodeAndSave, updateNodeAndSave, onSelectNode]);
 
   // 重新生成（在当前节点的父节点下创建新分支）
   const handleRegenerate = useCallback(async () => {
@@ -689,7 +693,7 @@ export function ChatPanel({
                 <TooltipContent side="top"><p>上传文档</p></TooltipContent>
               </Tooltip>
             </TooltipProvider>
-            {activeProvider?.imageGeneration && (
+            {imageGenerationConfig && (
               <TooltipProvider delayDuration={300}>
                 <Tooltip>
                   <TooltipTrigger asChild>

@@ -9,6 +9,7 @@ import {
   buildContext,
   streamChatCompletion,
   generateImage,
+  getImageGenerationConfig,
   resolveGeneratedImageDataUrl,
 } from "@/services";
 import { searchKnowledge } from "@/services/rag-service";
@@ -132,6 +133,9 @@ export function ChatView({
     (p) => p.id === config.activeProviderId
   );
   const activeModel = config?.activeModel || activeProvider?.defaultModel;
+  const imageGenerationConfig = activeProvider
+    ? getImageGenerationConfig(activeProvider)
+    : null;
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -510,7 +514,7 @@ export function ChatView({
 
   // 图片生成
   const handleGenerateImage = useCallback(() => {
-    if (!activeProvider || !activeProvider.imageGeneration) return;
+    if (!imageGenerationConfig) return;
     const latestConv = useConversationStore.getState().conversation || conversation;
     const prompt = buildImagePromptFromContext(
       latestConv.nodes,
@@ -521,16 +525,16 @@ export function ChatView({
 
     setImagePromptDraft(prompt);
     setImagePromptDialogOpen(true);
-  }, [activeProvider, conversation, selectedNodeId, inputText]);
+  }, [imageGenerationConfig, conversation, selectedNodeId, inputText]);
 
   const confirmGenerateImage = useCallback(async () => {
-    if (!activeProvider || !activeProvider.imageGeneration) return;
+    if (!imageGenerationConfig) return;
     const prompt = imagePromptDraft.trim();
     if (!prompt) return;
 
     setImagePromptDialogOpen(false);
 
-    const imgConfig = activeProvider.imageGeneration;
+    const imgConfig = imageGenerationConfig;
     setIsGenerating(true);
     setError(null);
 
@@ -562,8 +566,8 @@ export function ChatView({
 
       // 调用图片生成 API
       const result = await generateImage(
-        imgConfig.apiUrl || activeProvider.apiUrl,
-        imgConfig.apiKey || activeProvider.apiKey,
+        imgConfig.apiUrl,
+        imgConfig.apiKey,
         imgConfig.model,
         prompt,
         imgConfig.size
@@ -612,7 +616,7 @@ export function ChatView({
     } finally {
       setIsGenerating(false);
     }
-  }, [activeProvider, imagePromptDraft, conversation, selectedNodeId, addNodeAndSave, updateNodeAndSave, onSelectNode]);
+  }, [imageGenerationConfig, imagePromptDraft, conversation, selectedNodeId, addNodeAndSave, updateNodeAndSave, onSelectNode]);
 
   const handleRegenerate = useCallback(async () => {
     if (!currentNode || currentNode.role !== "assistant") return;
@@ -950,7 +954,7 @@ export function ChatView({
                   <TooltipContent side="top"><p>上传文档</p></TooltipContent>
                 </Tooltip>
               </TooltipProvider>
-              {activeProvider?.imageGeneration && (
+              {imageGenerationConfig && (
                 <TooltipProvider delayDuration={300}>
                   <Tooltip>
                     <TooltipTrigger asChild>

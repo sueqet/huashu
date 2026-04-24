@@ -1,3 +1,8 @@
+import * as pdfjs from "pdfjs-dist";
+import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
+
+pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+
 /**
  * 文档解析服务：将各类文档转为纯文本
  */
@@ -29,35 +34,51 @@ export async function parseDocument(
       return parseHTML(new TextDecoder("utf-8").decode(content));
 
     default:
-      // 尝试作为纯文本解析
       return new TextDecoder("utf-8").decode(content);
   }
 }
 
+function toArrayBuffer(content: Uint8Array): ArrayBuffer {
+  return content.buffer.slice(
+    content.byteOffset,
+    content.byteOffset + content.byteLength
+  ) as ArrayBuffer;
+}
+
 async function parsePDF(content: Uint8Array): Promise<string> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const pdfParseModule = await import("pdf-parse") as any;
-  const pdfParse = pdfParseModule.default || pdfParseModule;
-  const buffer = Buffer.from(content);
-  const result = await pdfParse(buffer);
-  return result.text;
+  const loadingTask = pdfjs.getDocument({ data: toArrayBuffer(content) });
+  const pdf = await loadingTask.promise;
+  const pages: string[] = [];
+
+  try {
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+      const page = await pdf.getPage(pageNumber);
+      const textContent = await page.getTextContent();
+      const pageText = textContent.items
+        .map((item) => ("str" in item ? item.str : ""))
+        .filter(Boolean)
+        .join(" ");
+      pages.push(pageText);
+    }
+  } finally {
+    await pdf.destroy();
+  }
+
+  return pages.join("\n\n");
 }
 
 async function parseDOCX(content: Uint8Array): Promise<string> {
   const mammoth = await import("mammoth");
   const result = await mammoth.extractRawText({
-    buffer: Buffer.from(content),
+    arrayBuffer: toArrayBuffer(content),
   });
   return result.value;
 }
 
 function parseHTML(html: string): string {
-  // 使用 cheerio 提取文本
-  const cheerio = require("cheerio") as typeof import("cheerio");
-  const $ = cheerio.load(html);
-  // 移除 script 和 style
-  $("script, style").remove();
-  return $("body").text().trim();
+  const document = new DOMParser().parseFromString(html, "text/html");
+  document.querySelectorAll("script, style").forEach((element) => element.remove());
+  return (document.body?.textContent || document.documentElement.textContent || "").trim();
 }
 
 /**

@@ -13,6 +13,15 @@ function attachmentPath(projectId: string, convId: string, attId: string, ext: s
   return `${attachmentsDir(projectId)}/${convId}/${attId}.${ext}`;
 }
 
+function resolveAttachmentPath(projectId: string, attachment: Attachment): string {
+  if (attachment.filePath) {
+    return `${attachmentsDir(projectId)}/${attachment.filePath}`;
+  }
+
+  const ext = getExt(attachment.filename);
+  return attachmentPath(projectId, "", attachment.id, ext);
+}
+
 /** 从文件名提取扩展名 */
 function getExt(filename: string): string {
   return filename.split(".").pop()?.toLowerCase() || "bin";
@@ -73,8 +82,7 @@ export const attachmentService = {
     // 已缓存则直接返回
     if (attachment.data) return attachment.data;
 
-    const ext = getExt(attachment.filename);
-    const path = attachmentPath(projectId, attachment.filePath.split("/")[0], attachment.id, ext);
+    const path = resolveAttachmentPath(projectId, attachment);
 
     if (attachment.type === "image") {
       const bytes = await readFile(path, { baseDir: BASE_DIR });
@@ -94,9 +102,7 @@ export const attachmentService = {
     projectId: string,
     attachment: Attachment
   ): Promise<void> {
-    const ext = getExt(attachment.filename);
-    const convId = attachment.filePath.split("/")[0];
-    const path = attachmentPath(projectId, convId, attachment.id, ext);
+    const path = resolveAttachmentPath(projectId, attachment);
     await fileService.removeFile(path);
   },
 
