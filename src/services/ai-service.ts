@@ -1,4 +1,10 @@
 import type { ContextMessage } from "./context-service";
+import {
+  extractMimeTypeFromDataUrl,
+  getSafeImageMimeType,
+  isModelCompatibleImageMimeType,
+  shouldTranscodeImageForModel,
+} from "@/lib/attachment-utils";
 import type { ModelConfig } from "@/types";
 
 /** 内联图片数据（从多模态模型响应中解析） */
@@ -27,6 +33,91 @@ interface ChatCompletionOptions {
   callbacks: StreamCallbacks;
 }
 
+async function loadImageElement(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("无法解码图片数据"));
+    image.src = src;
+  });
+}
+
+async function transcodeImageDataUrl(
+  dataUrl: string,
+  outputMimeType: string
+): Promise<string> {
+  const image = await loadImageElement(dataUrl);
+  const canvas = document.createElement("canvas");
+  canvas.width = image.naturalWidth || image.width;
+  canvas.height = image.naturalHeight || image.height;
+
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("无法创建图片转换画布");
+  }
+
+  context.drawImage(image, 0, 0);
+
+  const convertedUrl = canvas.toDataURL(outputMimeType);
+  if (!convertedUrl.startsWith("data:")) {
+    throw new Error("图片转换失败");
+  }
+
+  return convertedUrl;
+}
+
+async function prepareImageUrl(
+  url: string,
+  target: { apiUrl: string; model: string }
+): Promise<string> {
+  const mimeType = extractMimeTypeFromDataUrl(url);
+  if (!mimeType) return url;
+
+  if (isModelCompatibleImageMimeType(mimeType, target)) {
+    return url;
+  }
+
+  if (!shouldTranscodeImageForModel(mimeType, target)) {
+    return url;
+  }
+
+  return transcodeImageDataUrl(url, getSafeImageMimeType(mimeType));
+}
+
+async function prepareMessagesForApi(
+  messages: ContextMessage[],
+  target: { apiUrl: string; model: string }
+): Promise<ContextMessage[]> {
+  return Promise.all(
+    messages.map(async (message) => {
+      if (typeof message.content === "string") {
+        return message;
+      }
+
+      const content = await Promise.all(
+        message.content.map(async (part) => {
+          if (part.type !== "image_url") {
+            return part;
+          }
+
+          return {
+            ...part,
+            image_url: {
+              ...part.image_url,
+              url: await prepareImageUrl(part.image_url.url, target),
+            },
+          };
+        })
+      );
+
+      return {
+        ...message,
+        content,
+      };
+    })
+  );
+}
+
 /**
  * OpenAI 兼容的流式 AI 调用服务
  * 支持所有兼容 OpenAI Chat Completions API 的厂商
@@ -41,6 +132,16 @@ export async function streamChatCompletion(
   const url = apiUrl.endsWith("/")
     ? `${apiUrl}chat/completions`
     : `${apiUrl}/chat/completions`;
+  let preparedMessages: ContextMessage[];
+
+  try {
+    preparedMessages = await prepareMessagesForApi(messages, { apiUrl, model });
+  } catch (err) {
+    callbacks.onError(
+      err instanceof Error ? err : new Error("图片预处理失败")
+    );
+    return;
+  }
 
   let response: Response;
   try {
@@ -52,7 +153,7 @@ export async function streamChatCompletion(
       },
       body: JSON.stringify({
         model,
-        messages,
+        messages: preparedMessages,
         temperature: modelConfig.temperature,
         max_tokens: modelConfig.maxTokens,
         top_p: modelConfig.topP,

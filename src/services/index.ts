@@ -4,7 +4,7 @@ export { conversationService } from "./conversation-service";
 export { configService } from "./config-service";
 export { attachmentService } from "./attachment-service";
 export { migrateAttachments } from "./attachment-migration";
-export { generateImage } from "./image-generation-service";
+export { generateImage, resolveGeneratedImageDataUrl } from "./image-generation-service";
 export type { ImageGenerationResult } from "./image-generation-service";
 export { migrateData, registerMigration, SCHEMA_VERSIONS } from "./migration-service";
 export { countTokens, countMessagesTokens } from "./token-service";

@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
-import type { Conversation, ChatNode, Attachment } from "@/types";
-import { fileService } from "./file-service";
+import type { Attachment, ChatNode, Conversation } from "@/types";
 import { attachmentService } from "./attachment-service";
+import { fileService } from "./file-service";
 
 const CURRENT_SCHEMA_VERSION = 1;
 
@@ -13,13 +13,16 @@ function conversationPath(projectId: string, convId: string): string {
   return `${conversationsDir(projectId)}/${convId}.json`;
 }
 
-/**
- * 对话服务：管理对话的完整生命周期
- */
+function serializeNode(node: ChatNode): ChatNode {
+  return {
+    ...node,
+    attachments: node.attachments?.map((attachment) =>
+      attachmentService.stripAttachmentData(attachment)
+    ),
+  };
+}
+
 export const conversationService = {
-  /**
-   * 获取项目内所有对话的概要列表（扫描目录）
-   */
   async listConversations(
     projectId: string
   ): Promise<Array<{ id: string; name: string; updatedAt: number }>> {
@@ -40,35 +43,20 @@ export const conversationService = {
             updatedAt: conv.updatedAt,
           });
         } catch {
-          console.warn(`无法读取对话: ${entry.name}`);
+          console.warn(`Unable to read conversation: ${entry.name}`);
         }
       }
     }
 
-    // 按更新时间倒序
     list.sort((a, b) => b.updatedAt - a.updatedAt);
     return list;
   },
 
-  /**
-   * 获取完整对话数据
-   */
-  async getConversation(
-    projectId: string,
-    convId: string
-  ): Promise<Conversation> {
-    return fileService.readJSON<Conversation>(
-      conversationPath(projectId, convId)
-    );
+  async getConversation(projectId: string, convId: string): Promise<Conversation> {
+    return fileService.readJSON<Conversation>(conversationPath(projectId, convId));
   },
 
-  /**
-   * 创建新对话
-   */
-  async createConversation(
-    projectId: string,
-    name: string
-  ): Promise<Conversation> {
+  async createConversation(projectId: string, name: string): Promise<Conversation> {
     const id = uuidv4();
     const now = Date.now();
 
@@ -84,28 +72,22 @@ export const conversationService = {
     };
 
     await fileService.ensureDir(conversationsDir(projectId));
-    await fileService.writeJSON(
-      conversationPath(projectId, id),
-      conversation
-    );
+    await fileService.writeJSON(conversationPath(projectId, id), conversation);
 
     return conversation;
   },
 
-  /**
-   * 保存对话（完整覆盖写入，剥离附件 data）
-   */
   async saveConversation(conversation: Conversation): Promise<void> {
-    const updated = { ...conversation, updatedAt: Date.now() };
-
-    // 剥离所有附件的 data 字段，仅保留 filePath
-    for (const node of Object.values(updated.nodes)) {
-      if (node.attachments) {
-        node.attachments = node.attachments.map((att) =>
-          attachmentService.stripAttachmentData(att)
-        );
-      }
-    }
+    const updated: Conversation = {
+      ...conversation,
+      updatedAt: Date.now(),
+      nodes: Object.fromEntries(
+        Object.entries(conversation.nodes).map(([nodeId, node]) => [
+          nodeId,
+          serializeNode(node),
+        ])
+      ),
+    };
 
     await fileService.writeJSON(
       conversationPath(updated.projectId, updated.id),
@@ -113,21 +95,11 @@ export const conversationService = {
     );
   },
 
-  /**
-   * 删除对话（包括附件文件）
-   */
-  async deleteConversation(
-    projectId: string,
-    convId: string
-  ): Promise<void> {
+  async deleteConversation(projectId: string, convId: string): Promise<void> {
     await fileService.removeFile(conversationPath(projectId, convId));
-    // 清理附件目录
     await attachmentService.deleteConversationAttachments(projectId, convId);
   },
 
-  /**
-   * 重命名对话
-   */
   async renameConversation(
     projectId: string,
     convId: string,
@@ -136,16 +108,10 @@ export const conversationService = {
     const conv = await this.getConversation(projectId, convId);
     conv.name = newName;
     conv.updatedAt = Date.now();
-    await fileService.writeJSON(
-      conversationPath(projectId, convId),
-      conv
-    );
+    await fileService.writeJSON(conversationPath(projectId, convId), conv);
     return conv;
   },
 
-  /**
-   * 创建一个新的聊天节点
-   */
   createNode(
     conversationId: string,
     role: ChatNode["role"],
@@ -168,9 +134,11 @@ export const conversationService = {
       createdAt: now,
       updatedAt: now,
     };
+
     if (attachments && attachments.length > 0) {
       node.attachments = attachments;
     }
+
     return node;
   },
 };

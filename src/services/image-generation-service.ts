@@ -1,15 +1,37 @@
 export interface ImageGenerationResult {
-  /** base64 编码的图片数据（优先） */
   b64_json?: string;
-  /** 图片 URL（备选） */
   url?: string;
-  /** 修改后的 prompt */
   revised_prompt?: string;
 }
 
-/**
- * 调用 DALL-E 兼容的图片生成 API
- */
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    reader.onload = () => resolve(reader.result as string);
+    reader.readAsDataURL(blob);
+  });
+}
+
+export async function resolveGeneratedImageDataUrl(
+  result: ImageGenerationResult
+): Promise<string> {
+  if (result.b64_json) {
+    return `data:image/png;base64,${result.b64_json}`;
+  }
+
+  if (!result.url) {
+    throw new Error("图片生成 API 未返回图片数据");
+  }
+
+  const response = await fetch(result.url);
+  if (!response.ok) {
+    throw new Error(`无法下载生成图片: ${response.status}`);
+  }
+
+  return blobToDataUrl(await response.blob());
+}
+
 export async function generateImage(
   apiUrl: string,
   apiKey: string,
@@ -18,7 +40,6 @@ export async function generateImage(
   size: string,
   signal?: AbortSignal
 ): Promise<ImageGenerationResult> {
-  // 使用独立端点或默认 API 地址
   const baseUrl = apiUrl.endsWith("/") ? apiUrl.slice(0, -1) : apiUrl;
   const url = `${baseUrl}/images/generations`;
 

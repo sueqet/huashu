@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useCallback, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { open } from "@tauri-apps/plugin-dialog";
 import { readFile } from "@tauri-apps/plugin-fs";
@@ -19,6 +19,15 @@ function fileToBase64(bytes: Uint8Array, mimeType: string): string {
     binary += String.fromCharCode(bytes[i]);
   }
   return `data:${mimeType};base64,${btoa(binary)}`;
+}
+
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    reader.onload = () => resolve(reader.result as string);
+    reader.readAsDataURL(file);
+  });
 }
 
 function getMimeType(filename: string): string {
@@ -42,15 +51,15 @@ function getMimeType(filename: string): string {
   return map[ext] || "application/octet-stream";
 }
 
-/** 判断文件是否为图片类型 */
 function isImageMime(mimeType: string): boolean {
   return IMAGE_MIME_TYPES.has(mimeType);
 }
 
 export function useAttachments(projectId: string, conversationId: string) {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingError, setProcessingError] = useState<string | null>(null);
 
-  /** 创建附件并保存到磁盘 */
   const createAndSaveAttachment = useCallback(
     async (
       type: AttachmentType,
@@ -73,182 +82,167 @@ export function useAttachments(projectId: string, conversationId: string) {
         data,
       };
 
-      // 保存到磁盘
-      try {
-        await attachmentService.saveAttachment(projectId, conversationId, attachment);
-      } catch (err) {
-        console.warn("保存附件到磁盘失败:", err);
-      }
-
+      await attachmentService.saveAttachment(projectId, conversationId, attachment);
       return attachment;
     },
-    [projectId, conversationId]
+    [conversationId, projectId]
   );
 
-  /** 处理 Ctrl+V 粘贴图片 */
-  const handlePaste = useCallback(
-    (e: React.ClipboardEvent) => {
-      const items = e.clipboardData?.items;
-      if (!items) return;
+  const appendAttachment = useCallback((attachment: Attachment) => {
+    setAttachments((prev) => [...prev, attachment]);
+  }, []);
 
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        if (!item.type.startsWith("image/")) continue;
+  const runWithProcessing = useCallback(
+    async (task: () => Promise<void>, fallbackError: string) => {
+      setIsProcessing(true);
+      setProcessingError(null);
 
-        e.preventDefault();
-        const file = item.getAsFile();
-        if (!file) continue;
-
-        const reader = new FileReader();
-        reader.onload = async () => {
-          const dataUrl = reader.result as string;
-          const attachment = await createAndSaveAttachment(
-            "image",
-            `粘贴图片_${Date.now()}.png`,
-            file.type,
-            dataUrl,
-            file.size
-          );
-          setAttachments((prev) => [...prev, attachment]);
-        };
-        reader.readAsDataURL(file);
+      try {
+        await task();
+      } catch (err) {
+        console.warn(fallbackError, err);
+        setProcessingError(err instanceof Error ? err.message : fallbackError);
+      } finally {
+        setIsProcessing(false);
       }
     },
-    [createAndSaveAttachment]
+    []
   );
 
-  /** 通过 Tauri dialog 选择图片文件 */
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent) => {
+      const files = Array.from(e.clipboardData?.files || []).filter((file) =>
+        file.type.startsWith("image/")
+      );
+      if (files.length === 0) return;
+
+      e.preventDefault();
+      void runWithProcessing(async () => {
+        for (const file of files) {
+          const attachment = await createAndSaveAttachment(
+            "image",
+            `pasted_${Date.now()}.png`,
+            file.type || "image/png",
+            await fileToDataUrl(file),
+            file.size
+          );
+          appendAttachment(attachment);
+        }
+      }, "Failed to paste image");
+    },
+    [appendAttachment, createAndSaveAttachment, runWithProcessing]
+  );
+
   const pickImages = useCallback(async () => {
     const selected = await open({
       multiple: true,
-      filters: [
-        {
-          name: "图片",
-          extensions: IMAGE_EXTENSIONS,
-        },
-      ],
+      filters: [{ name: "Images", extensions: IMAGE_EXTENSIONS }],
     });
     if (!selected) return;
 
     const paths = Array.isArray(selected) ? selected : [selected];
-    for (const filePath of paths) {
-      try {
+    void runWithProcessing(async () => {
+      for (const filePath of paths) {
         const bytes = await readFile(filePath);
         const filename = filePath.split(/[/\\]/).pop() || "image";
         const mimeType = getMimeType(filename);
-        const dataUrl = fileToBase64(new Uint8Array(bytes), mimeType);
         const attachment = await createAndSaveAttachment(
           "image",
           filename,
           mimeType,
-          dataUrl,
+          fileToBase64(new Uint8Array(bytes), mimeType),
           bytes.length
         );
-        setAttachments((prev) => [...prev, attachment]);
-      } catch (err) {
-        console.warn("读取图片失败:", err);
+        appendAttachment(attachment);
       }
-    }
-  }, [createAndSaveAttachment]);
+    }, "Failed to read image");
+  }, [appendAttachment, createAndSaveAttachment, runWithProcessing]);
 
-  /** 通过 Tauri dialog 选择文档并解析为文本 */
   const pickDocuments = useCallback(async () => {
     const selected = await open({
       multiple: true,
-      filters: [
-        {
-          name: "文档",
-          extensions: DOC_EXTENSIONS,
-        },
-      ],
+      filters: [{ name: "Documents", extensions: DOC_EXTENSIONS }],
     });
     if (!selected) return;
 
     const paths = Array.isArray(selected) ? selected : [selected];
-    for (const filePath of paths) {
-      try {
+    void runWithProcessing(async () => {
+      for (const filePath of paths) {
         const bytes = await readFile(filePath);
         const filename = filePath.split(/[/\\]/).pop() || "document";
-        const text = await parseDocument(new Uint8Array(bytes), filename);
         const attachment = await createAndSaveAttachment(
           "document",
           filename,
           getMimeType(filename),
-          text,
+          await parseDocument(new Uint8Array(bytes), filename),
           bytes.length
         );
-        setAttachments((prev) => [...prev, attachment]);
-      } catch (err) {
-        console.warn("解析文档失败:", err);
+        appendAttachment(attachment);
       }
-    }
-  }, [createAndSaveAttachment]);
+    }, "Failed to parse document");
+  }, [appendAttachment, createAndSaveAttachment, runWithProcessing]);
 
-  /** 添加文件（拖拽上传用） */
   const addFiles = useCallback(
     async (files: File[]) => {
-      for (const file of files) {
-        try {
+      await runWithProcessing(async () => {
+        for (const file of files) {
           const mimeType = file.type || getMimeType(file.name);
-          const isImage = isImageMime(mimeType);
 
-          if (isImage) {
-            const dataUrl = await new Promise<string>((resolve) => {
-              const reader = new FileReader();
-              reader.onload = () => resolve(reader.result as string);
-              reader.readAsDataURL(file);
-            });
+          if (isImageMime(mimeType)) {
             const attachment = await createAndSaveAttachment(
               "image",
               file.name,
               mimeType,
-              dataUrl,
+              await fileToDataUrl(file),
               file.size
             );
-            setAttachments((prev) => [...prev, attachment]);
+            appendAttachment(attachment);
           } else {
             const buffer = await file.arrayBuffer();
-            const text = await parseDocument(new Uint8Array(buffer), file.name);
             const attachment = await createAndSaveAttachment(
               "document",
               file.name,
               mimeType,
-              text,
+              await parseDocument(new Uint8Array(buffer), file.name),
               file.size
             );
-            setAttachments((prev) => [...prev, attachment]);
+            appendAttachment(attachment);
           }
-        } catch (err) {
-          console.warn("处理文件失败:", file.name, err);
         }
-      }
+      }, "Failed to process dropped file");
     },
-    [createAndSaveAttachment]
+    [appendAttachment, createAndSaveAttachment, runWithProcessing]
   );
 
   const removeAttachment = useCallback(
     async (id: string) => {
       setAttachments((prev) => {
-        const att = prev.find((a) => a.id === id);
-        if (att) {
-          // 异步删除磁盘文件（不阻塞 UI）
-          attachmentService.deleteAttachment(projectId, att).catch((err) => {
-            console.warn("删除附件文件失败:", err);
+        const attachment = prev.find((item) => item.id === id);
+        if (attachment) {
+          attachmentService.deleteAttachment(projectId, attachment).catch((err) => {
+            console.warn("Failed to delete attachment", err);
           });
         }
-        return prev.filter((a) => a.id !== id);
+        return prev.filter((item) => item.id !== id);
       });
     },
     [projectId]
   );
 
   const clearAttachments = useCallback(() => {
-    // 清理时不删除磁盘文件（可能已用于已发送的消息）
     setAttachments([]);
+    setProcessingError(null);
+  }, []);
+
+  const clearProcessingError = useCallback(() => {
+    setProcessingError(null);
   }, []);
 
   return {
     attachments,
+    isProcessing,
+    processingError,
+    clearProcessingError,
     handlePaste,
     pickImages,
     pickDocuments,
