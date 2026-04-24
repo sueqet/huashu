@@ -1,6 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-cli/schema.json",
-  "productName": "璇濇爲",
+  "productName": "话树",
   "version": "0.3.1",
   "identifier": "com.huashu.desktop",
   "build": {
@@ -13,7 +13,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "璇濇爲",
+        "title": "话树",
         "width": 1200,
         "height": 800,
         "resizable": true,

@@ -40,3 +40,7 @@ src-tauri/gen/
 
 # VBS helper script
 create_shortcut.vbs
+
+# Local git worktrees
+worktrees/
+
