@@ -12,6 +12,7 @@ import {
   getImageGenerationConfig,
   resolveGeneratedImageDataUrl,
 } from "@/services";
+import { getGeneratedImageMetadata } from "@/services/image-generation-utils";
 import { searchKnowledge } from "@/services/rag-service";
 import { attachmentService } from "@/services/attachment-service";
 import { buildImagePromptFromContext } from "@/services/image-prompt-service";
@@ -48,6 +49,8 @@ import {
   X,
   Paperclip,
   Wand2,
+  Copy,
+  Check,
 } from "lucide-react";
 import {
   Tooltip,
@@ -575,19 +578,20 @@ export function ChatView({
 
       // 将图片转为 Attachment
       const attId = crypto.randomUUID();
-      const ext = "png";
-      const filePath = `${conversation.id}/${attId}.${ext}`;
       const dataUrl = await resolveGeneratedImageDataUrl(result);
 
       if (!dataUrl) throw new Error("图片生成 API 未返回图片数据");
 
+      const imageMeta = getGeneratedImageMetadata(dataUrl);
+      const filePath = `${conversation.id}/${attId}.${imageMeta.extension}`;
+
       const attachment: Attachment = {
         id: attId,
         type: "image",
-        filename: `generated_${Date.now()}.png`,
-        mimeType: "image/png",
+        filename: imageMeta.filename,
+        mimeType: imageMeta.mimeType,
         filePath,
-        size: result.b64_json?.length || 0,
+        size: imageMeta.size,
         data: dataUrl,
       };
 
@@ -1054,6 +1058,7 @@ function ChatBubble({
   const isUser = node.role === "user";
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState("");
+  const [copied, setCopied] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const nodeAttachments = node.attachments || [];
 
@@ -1092,6 +1097,13 @@ function ChatBubble({
     setIsEditing(false);
     setEditText("");
   }, []);
+
+  const handleCopyContent = useCallback(() => {
+    navigator.clipboard.writeText(node.content).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }, [node.content]);
 
   const handleEditKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -1143,6 +1155,27 @@ function ChatBubble({
         )}
 
         <div className="ml-auto flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          {!isUser && (
+            <TooltipProvider delayDuration={300}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    className="p-1 rounded hover:bg-background/50"
+                    onClick={handleCopyContent}
+                  >
+                    {copied ? (
+                      <Check className="h-3.5 w-3.5 text-green-600" />
+                    ) : (
+                      <Copy className="h-3.5 w-3.5 text-muted-foreground" />
+                    )}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  <p>复制消息原文</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
           <TooltipProvider delayDuration={300}>
             <Tooltip>
               <TooltipTrigger asChild>

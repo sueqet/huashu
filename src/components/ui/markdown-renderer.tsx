@@ -177,15 +177,16 @@ const markdownComponents = {
 // Code block with copy button
 function CodeBlock({ className, children }: { className?: string; children: React.ReactNode }) {
   const [copied, setCopied] = useState(false);
+  const codeRef = useRef<HTMLElement | null>(null);
   const language = className?.replace("language-", "") || "";
 
   const handleCopy = useCallback(() => {
-    const text = String(children).replace(/\n$/, "");
+    const text = (codeRef.current?.textContent || "").replace(/\n$/, "");
     navigator.clipboard.writeText(text).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
-  }, [children]);
+  }, []);
 
   return (
     <div className="relative group/code my-2 rounded-lg overflow-hidden border border-border">
@@ -209,7 +210,7 @@ function CodeBlock({ className, children }: { className?: string; children: Reac
         </button>
       )}
       <pre className="overflow-x-auto p-3 text-sm">
-        <code className={className}>{children}</code>
+        <code ref={codeRef} className={className}>{children}</code>
       </pre>
     </div>
   );

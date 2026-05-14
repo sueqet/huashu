@@ -1,9 +1,16 @@
 import { v4 as uuidv4 } from "uuid";
-import type { AppConfig, ApiProvider } from "@/types";
+import type { AppConfig, ApiProvider, ModelConfig } from "@/types";
 import { fileService } from "./file-service";
 
 const CONFIG_PATH = "config.json";
 const CURRENT_SCHEMA_VERSION = 1;
+const DEFAULT_MODEL_CONFIG: ModelConfig = {
+  temperature: 0.7,
+  maxTokens: 4096,
+  topP: 1,
+  frequencyPenalty: 0,
+  presencePenalty: 0,
+};
 
 function createDefaultConfig(): AppConfig {
   return {
@@ -12,6 +19,27 @@ function createDefaultConfig(): AppConfig {
     activeProviderId: undefined,
     activeModel: undefined,
     autoGenerateOnEnter: true,
+  };
+}
+
+function normalizeProvider(provider: ApiProvider): ApiProvider {
+  return {
+    ...provider,
+    models: provider.models || [],
+    maxContextTokens: provider.maxContextTokens || 128000,
+    modelConfig: {
+      ...DEFAULT_MODEL_CONFIG,
+      ...(provider.modelConfig || {}),
+    },
+  };
+}
+
+function normalizeConfig(config: AppConfig): AppConfig {
+  return {
+    ...createDefaultConfig(),
+    ...config,
+    schemaVersion: CURRENT_SCHEMA_VERSION,
+    providers: (config.providers || []).map(normalizeProvider),
   };
 }
 
@@ -29,7 +57,9 @@ export const configService = {
       await fileService.writeJSON(CONFIG_PATH, defaultConfig);
       return defaultConfig;
     }
-    return fileService.readJSON<AppConfig>(CONFIG_PATH);
+    const config = normalizeConfig(await fileService.readJSON<AppConfig>(CONFIG_PATH));
+    await fileService.writeJSON(CONFIG_PATH, config);
+    return config;
   },
 
   /**

@@ -23,6 +23,12 @@ export interface Attachment {
   mimeType: string;
   /** 文件路径，相对于项目附件目录："{convId}/{attId}.{ext}" */
   filePath: string;
+  /** 原始文件路径，用于文档预览/下载；旧附件可为空 */
+  originalFilePath?: string;
+  /** 提取文本路径，用于模型上下文；旧附件可为空 */
+  textFilePath?: string;
+  /** 预览类型；旧附件可为空 */
+  previewKind?: "image" | "text" | "pdf" | "docx";
   /** 原始文件大小（字节） */
   size: number;
   /** 内存缓存，不持久化到 JSON（base64 data URL 图片 / 文本 文档） */

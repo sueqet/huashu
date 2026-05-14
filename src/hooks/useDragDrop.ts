@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 
 const IMAGE_MIME_TYPES = new Set([
   "image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp",
@@ -26,13 +26,13 @@ interface UseDragDropOptions {
  */
 export function useDragDrop({ onFiles }: UseDragDropOptions) {
   const [isDragging, setIsDragging] = useState(false);
-  let enterCount = 0;
+  const enterCountRef = useRef(0);
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    enterCount++;
-    if (enterCount === 1) {
+    enterCountRef.current++;
+    if (enterCountRef.current === 1) {
       setIsDragging(true);
     }
   }, []);
@@ -45,9 +45,9 @@ export function useDragDrop({ onFiles }: UseDragDropOptions) {
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    enterCount--;
-    if (enterCount <= 0) {
-      enterCount = 0;
+    enterCountRef.current--;
+    if (enterCountRef.current <= 0) {
+      enterCountRef.current = 0;
       setIsDragging(false);
     }
   }, []);
@@ -55,7 +55,7 @@ export function useDragDrop({ onFiles }: UseDragDropOptions) {
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    enterCount = 0;
+    enterCountRef.current = 0;
     setIsDragging(false);
 
     const files: File[] = [];

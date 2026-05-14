@@ -9,6 +9,7 @@ export interface ModelConfig {
   topP: number;
   frequencyPenalty: number;
   presencePenalty: number;
+  reasoningEffort?: "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
 }
 
 export interface ImageGenerationConfig {

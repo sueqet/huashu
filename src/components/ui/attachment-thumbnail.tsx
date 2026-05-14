@@ -8,7 +8,7 @@ type ThumbnailSize = "node" | "input" | "chat";
 const SIZE_MAP: Record<ThumbnailSize, string> = {
   node: "h-12 w-12",
   input: "h-10 w-10",
-  chat: "", // 自适应
+  chat: "",
 };
 
 interface AttachmentThumbnailProps {
@@ -19,9 +19,6 @@ interface AttachmentThumbnailProps {
   onClick?: () => void;
 }
 
-/**
- * 附件缩略图组件：懒加载图片，支持三种尺寸
- */
 export function AttachmentThumbnail({
   attachment,
   projectId,
@@ -31,9 +28,14 @@ export function AttachmentThumbnail({
 }: AttachmentThumbnailProps) {
   const [src, setSrc] = useState<string>(attachment.data || "");
   const [loading, setLoading] = useState(!attachment.data && attachment.type === "image");
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (attachment.type !== "image") return;
+
+    setSrc("");
+    setError(null);
+
     if (attachment.data) {
       setSrc(attachment.data);
       setLoading(false);
@@ -49,14 +51,38 @@ export function AttachmentThumbnail({
         setLoading(false);
       }
     }).catch((err) => {
-      console.warn("加载缩略图失败:", err);
-      if (!cancelled) setLoading(false);
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn("加载缩略图失败", {
+        projectId,
+        attachmentId: attachment.id,
+        filename: attachment.filename,
+        filePath: attachment.filePath,
+        error: err,
+      });
+      if (!cancelled) {
+        setError(message);
+        setSrc("");
+        setLoading(false);
+      }
     });
 
     return () => { cancelled = true; };
   }, [attachment, projectId]);
 
-  // 文档类型：显示图标
+  const handleImageError = () => {
+    const message = `无法解码图片: ${attachment.filename}`;
+    console.warn("缩略图解码失败", {
+      projectId,
+      attachmentId: attachment.id,
+      filename: attachment.filename,
+      mimeType: attachment.mimeType,
+      filePath: attachment.filePath,
+    });
+    setError(message);
+    setSrc("");
+    setLoading(false);
+  };
+
   if (attachment.type === "document") {
     return (
       <div
@@ -68,7 +94,6 @@ export function AttachmentThumbnail({
     );
   }
 
-  // 图片加载中
   if (loading) {
     return (
       <div
@@ -79,11 +104,11 @@ export function AttachmentThumbnail({
     );
   }
 
-  // 图片加载失败
   if (!src) {
     return (
       <div
         className={`flex items-center justify-center bg-muted rounded ${SIZE_MAP[size]} text-[8px] text-muted-foreground ${className || ""}`}
+        title={error || `加载失败: ${attachment.filename}`}
         onClick={onClick}
       >
         失败
@@ -97,6 +122,7 @@ export function AttachmentThumbnail({
       alt={attachment.filename}
       className={`object-cover rounded ${SIZE_MAP[size]} ${className || ""}`}
       onClick={onClick}
+      onError={handleImageError}
       loading="lazy"
     />
   );

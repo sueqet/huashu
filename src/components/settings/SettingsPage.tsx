@@ -14,6 +14,35 @@ import {
 } from "lucide-react";
 import { useConfirm } from "@/hooks/useConfirm";
 import type { ApiProvider, ModelConfig, EmbeddingConfig, ImageGenerationConfig } from "@/types";
+import { normalizeImageSize } from "@/services/image-generation-utils";
+
+const DEFAULT_MODEL_CONFIG: ModelConfig = {
+  temperature: 0.7,
+  maxTokens: 4096,
+  topP: 1,
+  frequencyPenalty: 0,
+  presencePenalty: 0,
+};
+
+const REASONING_EFFORT_OPTIONS: Array<{
+  value: NonNullable<ModelConfig["reasoningEffort"]>;
+  label: string;
+}> = [
+  { value: "none", label: "None" },
+  { value: "minimal", label: "Minimal" },
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+  { value: "xhigh", label: "XHigh" },
+];
+
+const IMAGE_SIZE_PRESETS = [
+  "1024x1024",
+  "1024x1792",
+  "1792x1024",
+  "512x512",
+  "256x256",
+];
 
 export function SettingsPage() {
   const {
@@ -168,12 +197,9 @@ function ProviderForm({ initial, onSave, onCancel }: ProviderFormProps) {
   );
   const [showImgGenKey, setShowImgGenKey] = useState(false);
 
-  const defaultConfig: ModelConfig = initial?.modelConfig || {
-    temperature: 0.7,
-    maxTokens: 4096,
-    topP: 1,
-    frequencyPenalty: 0,
-    presencePenalty: 0,
+  const defaultConfig: ModelConfig = {
+    ...DEFAULT_MODEL_CONFIG,
+    ...(initial?.modelConfig || {}),
   };
 
   const [modelConfig, setModelConfig] = useState<ModelConfig>(defaultConfig);
@@ -192,7 +218,7 @@ function ProviderForm({ initial, onSave, onCancel }: ProviderFormProps) {
       const imageGeneration: ImageGenerationConfig | undefined = imgGenEnabled
         ? {
             model: imgGenModel.trim(),
-            size: imgGenSize,
+            size: normalizeImageSize(imgGenSize),
             ...(imgGenApiUrl.trim() ? { apiUrl: imgGenApiUrl.trim() } : {}),
             ...(imgGenApiKey.trim() ? { apiKey: imgGenApiKey.trim() } : {}),
           }
@@ -355,6 +381,55 @@ function ProviderForm({ initial, onSave, onCancel }: ProviderFormProps) {
               className="w-full mt-1 px-2 py-1 border rounded text-sm bg-background outline-none"
             />
           </div>
+          <div>
+            <label className="text-xs text-muted-foreground">频率惩罚</label>
+            <input
+              type="number"
+              step="0.1"
+              min="-2"
+              max="2"
+              value={modelConfig.frequencyPenalty}
+              onChange={(e) =>
+                setModelConfig({ ...modelConfig, frequencyPenalty: Number(e.target.value) })
+              }
+              className="w-full mt-1 px-2 py-1 border rounded text-sm bg-background outline-none"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground">存在惩罚</label>
+            <input
+              type="number"
+              step="0.1"
+              min="-2"
+              max="2"
+              value={modelConfig.presencePenalty}
+              onChange={(e) =>
+                setModelConfig({ ...modelConfig, presencePenalty: Number(e.target.value) })
+              }
+              className="w-full mt-1 px-2 py-1 border rounded text-sm bg-background outline-none"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground">思考强度</label>
+            <select
+              value={modelConfig.reasoningEffort || ""}
+              onChange={(e) =>
+                setModelConfig({
+                  ...modelConfig,
+                  reasoningEffort:
+                    (e.target.value || undefined) as ModelConfig["reasoningEffort"],
+                })
+              }
+              className="w-full mt-1 px-2 py-1 border rounded text-sm bg-background outline-none"
+            >
+              <option value="">不传递</option>
+              {REASONING_EFFORT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
@@ -415,17 +490,30 @@ function ProviderForm({ initial, onSave, onCancel }: ProviderFormProps) {
               </div>
               <div>
                 <label className="text-xs text-muted-foreground">图片尺寸</label>
-                <select
+                <input
+                  type="text"
                   value={imgGenSize}
                   onChange={(e) => setImgGenSize(e.target.value)}
+                  onBlur={() => setImgGenSize((value) => normalizeImageSize(value))}
+                  placeholder="1024x1024"
                   className="w-full mt-1 px-2 py-1 border rounded text-sm bg-background outline-none"
-                >
-                  <option value="1024x1024">1024x1024</option>
-                  <option value="1024x1792">1024x1792</option>
-                  <option value="1792x1024">1792x1024</option>
-                  <option value="512x512">512x512</option>
-                  <option value="256x256">256x256</option>
-                </select>
+                />
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {IMAGE_SIZE_PRESETS.map((size) => (
+                    <button
+                      key={size}
+                      type="button"
+                      className={`px-1.5 py-0.5 text-[10px] rounded border ${
+                        normalizeImageSize(imgGenSize) === size
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "border-border hover:bg-accent"
+                      }`}
+                      onClick={() => setImgGenSize(size)}
+                    >
+                      {size}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
             <div>
@@ -604,7 +692,12 @@ function ProviderCard({
               <div className="text-xs text-muted-foreground">
                 温度: {provider.modelConfig.temperature} | 最大Token:{" "}
                 {provider.modelConfig.maxTokens} | Top P:{" "}
-                {provider.modelConfig.topP}
+                {provider.modelConfig.topP} | 频率惩罚:{" "}
+                {provider.modelConfig.frequencyPenalty} | 存在惩罚:{" "}
+                {provider.modelConfig.presencePenalty}
+                {provider.modelConfig.reasoningEffort
+                  ? ` | 思考强度: ${provider.modelConfig.reasoningEffort}`
+                  : ""}
               </div>
 
               <div className="flex gap-2">

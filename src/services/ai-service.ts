@@ -6,6 +6,7 @@ import {
   shouldTranscodeImageForModel,
 } from "@/lib/attachment-utils";
 import type { ModelConfig } from "@/types";
+import { buildChatCompletionRequestBody } from "./ai-request-body";
 
 /** 内联图片数据（从多模态模型响应中解析） */
 export interface InlineImageData {
@@ -152,14 +153,11 @@ export async function streamChatCompletion(
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model,
-        messages: preparedMessages,
-        temperature: modelConfig.temperature,
-        max_tokens: modelConfig.maxTokens,
-        top_p: modelConfig.topP,
-        frequency_penalty: modelConfig.frequencyPenalty,
-        presence_penalty: modelConfig.presencePenalty,
-        stream: true,
+        ...buildChatCompletionRequestBody({
+          model,
+          messages: preparedMessages,
+          modelConfig,
+        }),
       }),
       signal,
     });

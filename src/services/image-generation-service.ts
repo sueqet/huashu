@@ -1,3 +1,5 @@
+import { normalizeImageSize } from "./image-generation-utils";
+
 export interface ImageGenerationResult {
   b64_json?: string;
   url?: string;
@@ -29,7 +31,7 @@ export function getImageGenerationConfig(provider: {
     apiUrl: provider.imageGeneration?.apiUrl?.trim() || provider.apiUrl,
     apiKey: provider.imageGeneration?.apiKey?.trim() || provider.apiKey,
     model,
-    size: provider.imageGeneration?.size || "1024x1024",
+    size: normalizeImageSize(provider.imageGeneration?.size),
   };
 }
 
@@ -46,7 +48,7 @@ function createImageGenerationBody(
     model,
     prompt,
     n: 1,
-    size,
+    size: normalizeImageSize(size),
   };
 
   if (supportsResponseFormat(model)) {

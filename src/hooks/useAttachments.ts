@@ -5,6 +5,7 @@ import { readFile } from "@tauri-apps/plugin-fs";
 import type { Attachment, AttachmentType } from "@/types";
 import { parseDocument } from "@/services/document-parser";
 import { attachmentService } from "@/services/attachment-service";
+import { getAttachmentPreviewKind } from "@/services/attachment-preview";
 
 const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
 const DOC_EXTENSIONS = ["txt", "md", "pdf", "docx", "html", "htm", "csv", "log"];
@@ -83,6 +84,43 @@ export function useAttachments(projectId: string, conversationId: string) {
       };
 
       await attachmentService.saveAttachment(projectId, conversationId, attachment);
+      return attachment;
+    },
+    [conversationId, projectId]
+  );
+
+  const createAndSaveDocumentAttachment = useCallback(
+    async (
+      filename: string,
+      mimeType: string,
+      originalBytes: Uint8Array,
+      text: string
+    ): Promise<Attachment> => {
+      const id = uuidv4();
+      const ext = filename.split(".").pop()?.toLowerCase() || "bin";
+      const originalFilePath = `${conversationId}/${id}.${ext}`;
+      const textFilePath = `${conversationId}/${id}.txt`;
+
+      const attachment: Attachment = {
+        id,
+        type: "document",
+        filename,
+        mimeType,
+        filePath: textFilePath,
+        originalFilePath,
+        textFilePath,
+        previewKind: getAttachmentPreviewKind("document", filename, mimeType),
+        size: originalBytes.length,
+        data: text,
+      };
+
+      await attachmentService.saveDocumentAttachment(
+        projectId,
+        conversationId,
+        attachment,
+        originalBytes,
+        text
+      );
       return attachment;
     },
     [conversationId, projectId]
@@ -170,17 +208,18 @@ export function useAttachments(projectId: string, conversationId: string) {
       for (const filePath of paths) {
         const bytes = await readFile(filePath);
         const filename = filePath.split(/[/\\]/).pop() || "document";
-        const attachment = await createAndSaveAttachment(
-          "document",
+        const originalBytes = new Uint8Array(bytes);
+        const mimeType = getMimeType(filename);
+        const attachment = await createAndSaveDocumentAttachment(
           filename,
-          getMimeType(filename),
-          await parseDocument(new Uint8Array(bytes), filename),
-          bytes.length
+          mimeType,
+          originalBytes,
+          await parseDocument(originalBytes, filename)
         );
         appendAttachment(attachment);
       }
     }, "Failed to parse document");
-  }, [appendAttachment, createAndSaveAttachment, runWithProcessing]);
+  }, [appendAttachment, createAndSaveDocumentAttachment, runWithProcessing]);
 
   const addFiles = useCallback(
     async (files: File[]) => {
@@ -199,19 +238,19 @@ export function useAttachments(projectId: string, conversationId: string) {
             appendAttachment(attachment);
           } else {
             const buffer = await file.arrayBuffer();
-            const attachment = await createAndSaveAttachment(
-              "document",
+            const originalBytes = new Uint8Array(buffer);
+            const attachment = await createAndSaveDocumentAttachment(
               file.name,
               mimeType,
-              await parseDocument(new Uint8Array(buffer), file.name),
-              file.size
+              originalBytes,
+              await parseDocument(originalBytes, file.name)
             );
             appendAttachment(attachment);
           }
         }
       }, "Failed to process dropped file");
     },
-    [appendAttachment, createAndSaveAttachment, runWithProcessing]
+    [appendAttachment, createAndSaveAttachment, createAndSaveDocumentAttachment, runWithProcessing]
   );
 
   const removeAttachment = useCallback(
