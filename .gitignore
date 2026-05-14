@@ -28,6 +28,7 @@ CLAUDE.md
 # Project internal docs (not for public repo)
 document/
 docs/
+PROJECT_INDEX.md
 
 # Temp files
 *.tmp
