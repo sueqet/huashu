@@ -1,6 +1,7 @@
 import type { ChatNode } from "@/types";
 import { attachmentService } from "./attachment-service";
 import { countMessagesTokens } from "./token-service";
+import { inChainOrder, keepNewestWithinBudget, partitionChain } from "./context-window";
 
 const MAX_DOCUMENT_CONTEXT_CHARS = 12000;
 
@@ -177,62 +178,32 @@ export async function buildContext(
     };
   }
 
-  const firstRound = chain.slice(0, 2);
-  const lastRoundStart = Math.max(2, chain.length - recentRounds * 2);
-  const recentMessages = chain.slice(lastRoundStart);
-  const middleMessages = chain.slice(2, lastRoundStart);
+  const { fixed, candidates } = partitionChain(chain, recentRounds);
 
   const systemTokens =
     messages.length > 0 ? countMessagesTokens(messages, model) : 0;
-  const pinnedMiddle = middleMessages.filter((node) => node.isPinned);
-  const unpinnedMiddle = middleMessages.filter((node) => !node.isPinned);
-
-  const fixedNodes = [...firstRound, ...pinnedMiddle, ...recentMessages];
   const fixedMessages = await Promise.all(
-    fixedNodes.map((node) => nodeToMessage(node, projectId))
+    fixed.map((node) => nodeToMessage(node, projectId))
   );
   const fixedTokens = systemTokens + countMessagesTokens(fixedMessages, model);
 
-  let remainingTokens = maxTokens - fixedTokens;
-  const keptMiddleNodes: ChatNode[] = [];
-  const keptMiddleMessages = new Map<string, ContextMessage>();
+  const candidateMessages = await Promise.all(
+    candidates.map((node) => nodeToMessage(node, projectId))
+  );
+  const keptIndexes = keepNewestWithinBudget(
+    candidateMessages.map((message) => countSingleMessageTokens(message, model)),
+    maxTokens - fixedTokens
+  );
+  truncated = keptIndexes.size < candidates.length;
 
-  for (let i = unpinnedMiddle.length - 1; i >= 0; i--) {
-    const node = unpinnedMiddle[i];
-    const message = await nodeToMessage(node, projectId);
-    const messageTokens = countSingleMessageTokens(message, model);
-
-    if (remainingTokens >= messageTokens) {
-      keptMiddleNodes.unshift(node);
-      keptMiddleMessages.set(node.id, message);
-      remainingTokens -= messageTokens;
-    } else {
-      truncated = true;
-    }
-  }
-
-  const fixedMessageMap = new Map<string, ContextMessage>();
-  fixedNodes.forEach((node, index) => {
-    fixedMessageMap.set(node.id, fixedMessages[index]);
+  const messageById = new Map<string, ContextMessage>();
+  fixed.forEach((node, index) => messageById.set(node.id, fixedMessages[index]));
+  candidates.forEach((node, index) => {
+    if (keptIndexes.has(index)) messageById.set(node.id, candidateMessages[index]);
   });
 
-  const orderedNodes = [
-    ...firstRound,
-    ...keptMiddleNodes,
-    ...pinnedMiddle,
-    ...recentMessages,
-  ];
-  const seen = new Set<string>();
-
-  for (const node of orderedNodes) {
-    if (seen.has(node.id)) continue;
-    seen.add(node.id);
-
-    const message =
-      keptMiddleMessages.get(node.id) ?? fixedMessageMap.get(node.id);
-    if (message) {
-      messages.push(message);
-    }
+  for (const node of inChainOrder(chain, new Set(messageById.keys()))) {
+    messages.push(messageById.get(node.id)!);
   }
 
   return {

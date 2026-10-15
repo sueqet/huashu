@@ -162,7 +162,11 @@ export async function streamChatCompletion(
       signal,
     });
   } catch (err) {
-    if (signal?.aborted) return;
+    // 在收到响应前被中断：仍需通知调用方结束，否则界面会停留在"生成中"
+    if (signal?.aborted) {
+      callbacks.onDone("");
+      return;
+    }
     callbacks.onError(
       err instanceof Error ? err : new Error("网络请求失败")
     );

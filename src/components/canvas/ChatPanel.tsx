@@ -258,10 +258,17 @@ export function ChatPanel({
           }
         },
         onDone: async (content) => {
-          await updateNodeAndSave(aiNode.id, {
-            content,
-            isPartial: false,
-          });
+          // 没有生成任何内容（如在响应前停止）：移除空的 AI 节点
+          if (!content) {
+            await useConversationStore.getState().removeNodeTreeAndSave(aiNode.id);
+            onSelectNode(targetNodeId);
+            if (!controller.signal.aborted) setError("模型未返回任何内容");
+          } else {
+            await updateNodeAndSave(aiNode.id, {
+              content,
+              isPartial: false,
+            });
+          }
           setStreamingContent("");
           setIsGenerating(false);
           abortControllerRef.current = null;

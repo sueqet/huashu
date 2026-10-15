@@ -52,11 +52,8 @@ export const fileService = {
     try {
       // 写入临时文件
       await writeTextFile(tmpPath, content, { baseDir: BASE_DIR });
-      // 原子替换：如果目标文件存在，先删除再重命名
-      const targetExists = await exists(path, { baseDir: BASE_DIR });
-      if (targetExists) {
-        await remove(path, { baseDir: BASE_DIR });
-      }
+      // 原子替换：rename 会直接覆盖已存在的目标文件（POSIX rename / Windows MoveFileEx），
+      // 不能先删除目标，否则在两步之间崩溃会丢失原文件
       await rename(tmpPath, path, {
         oldPathBaseDir: BASE_DIR,
         newPathBaseDir: BASE_DIR,
