@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import rehypeHighlight from "rehype-highlight";
+import { isLocalImageSrc } from "@/lib/attachment-utils";
 import "katex/dist/katex.min.css";
 import "highlight.js/styles/github.css";
 
@@ -156,6 +157,14 @@ const markdownComponents = {
     return <hr className="my-4 border-border" />;
   },
   img({ src, alt }: any) {
+    // 隐私：只显示本地图片（data:/blob:），不向外部地址发起请求
+    if (!isLocalImageSrc(src)) {
+      return (
+        <span className="inline-block rounded border border-dashed px-2 py-0.5 text-xs text-muted-foreground">
+          外部图片未加载{alt ? `：${alt}` : ""}
+        </span>
+      );
+    }
     return (
       <img
         src={src}

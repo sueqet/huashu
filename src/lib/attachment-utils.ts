@@ -86,3 +86,13 @@ export function getSafeImageMimeType(mimeType: string): string {
 
   return "image/png";
 }
+
+/**
+ * 是否为本地图片地址（data:/blob:）。
+ * 渲染 AI 回复或导入内容时只显示本地图片，避免向外部地址发起请求。
+ */
+export function isLocalImageSrc(src: unknown): src is string {
+  if (typeof src !== "string") return false;
+  const normalized = src.trim().toLowerCase();
+  return normalized.startsWith("data:image/") || normalized.startsWith("blob:");
+}
