@@ -13,7 +13,6 @@ import {
   resolveGeneratedImageDataUrl,
 } from "@/services";
 import { getGeneratedImageMetadata } from "@/services/image-generation-utils";
-import { searchKnowledge } from "@/services/rag-service";
 import { attachmentService } from "@/services/attachment-service";
 import { buildImagePromptFromContext } from "@/services/image-prompt-service";
 import { useAttachments } from "@/hooks/useAttachments";
@@ -163,35 +162,6 @@ export function ChatPanel({
     await addNodeAndSave(aiNode);
     onSelectNode(aiNode.id);
 
-    // RAG 检索（如果项目启用了 RAG）
-    let ragContext: string | undefined;
-    if (project?.ragEnabled && activeProvider.embedding) {
-      try {
-        const freshConv = useConversationStore.getState().conversation!;
-        const targetNode = freshConv.nodes[targetNodeId];
-        if (targetNode?.content) {
-          const ragResults = await searchKnowledge(
-            freshConv.projectId,
-            targetNode.content,
-            activeProvider.apiUrl,
-            activeProvider.apiKey,
-            activeProvider.embedding.model,
-            5
-          );
-          if (ragResults.length > 0) {
-            ragContext = ragResults
-              .map(
-                (r, i) =>
-                  `[参考${i + 1}] (相似度: ${(r.score * 100).toFixed(1)}%)\n${r.chunk.content}`
-              )
-              .join("\n\n");
-          }
-        }
-      } catch (err) {
-        console.warn("RAG 检索失败:", err);
-      }
-    }
-
     // 获取最新节点数据用于构建上下文
     const freshNodes = useConversationStore.getState().conversation!.nodes;
     const context = await buildContext({
@@ -199,7 +169,6 @@ export function ChatPanel({
       currentNodeId: targetNodeId,
       projectId: conversation.projectId,
       projectDescription: project?.description,
-      ragContext,
       maxTokens: activeProvider.maxContextTokens,
       model: activeModel,
     });

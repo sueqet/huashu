@@ -69,7 +69,6 @@ export const SCHEMA_VERSIONS = {
   config: 1,
   project: 1,
   conversation: 1,
-  knowledgeBase: 1,
 } as const;
 
 // ========== 示例：未来版本迁移可以这样注册 ==========

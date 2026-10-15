@@ -16,7 +16,7 @@ interface ProjectState {
   /** 更新项目 */
   updateProject: (
     id: string,
-    updates: Partial<Pick<Project, "name" | "description" | "isArchived" | "ragEnabled" | "storyConfig">>
+    updates: Partial<Pick<Project, "name" | "description" | "isArchived" | "storyConfig">>
   ) => Promise<void>;
   /** 删除项目 */
   deleteProject: (id: string) => Promise<void>;

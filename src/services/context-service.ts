@@ -98,12 +98,10 @@ interface BuildContextOptions {
   currentNodeId: string;
   projectId?: string;
   projectDescription?: string;
-  ragContext?: string;
   maxTokens: number;
   model: string;
   recentRounds?: number;
   storyConfig?: import("@/types").StoryConfig;
-  storyRagContext?: string;
 }
 
 interface ContextResult {
@@ -141,12 +139,10 @@ export async function buildContext(
     currentNodeId,
     projectId,
     projectDescription,
-    ragContext,
     maxTokens,
     model,
     recentRounds = 3,
     storyConfig,
-    storyRagContext,
   } = options;
 
   const messages: ContextMessage[] = [];
@@ -154,16 +150,13 @@ export async function buildContext(
 
   if (storyConfig) {
     const { buildStorySystemPrompt } = await import("./story-service");
-    const storyPrompt = buildStorySystemPrompt(storyConfig, storyRagContext);
+    const storyPrompt = buildStorySystemPrompt(storyConfig);
     if (storyPrompt) {
       messages.push({ role: "system", content: storyPrompt });
     }
   } else {
     const systemParts: string[] = [];
     if (projectDescription) systemParts.push(projectDescription);
-    if (ragContext) {
-      systemParts.push("以下是相关的参考资料：\n" + ragContext);
-    }
     if (systemParts.length > 0) {
       messages.push({ role: "system", content: systemParts.join("\n\n") });
     }

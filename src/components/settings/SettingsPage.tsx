@@ -13,7 +13,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { useConfirm } from "@/hooks/useConfirm";
-import type { ApiProvider, ModelConfig, EmbeddingConfig, ImageGenerationConfig } from "@/types";
+import type { ApiProvider, ModelConfig, ImageGenerationConfig } from "@/types";
 import { normalizeImageSize } from "@/services/image-generation-utils";
 
 const DEFAULT_MODEL_CONFIG: ModelConfig = {
@@ -173,14 +173,6 @@ function ProviderForm({ initial, onSave, onCancel }: ProviderFormProps) {
   const [showKey, setShowKey] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // Embedding 配置
-  const [embeddingModel, setEmbeddingModel] = useState(
-    initial?.embedding?.model || ""
-  );
-  const [embeddingDimension, setEmbeddingDimension] = useState(
-    initial?.embedding?.dimension || 1536
-  );
-
   // 图片生成配置
   const [imgGenEnabled, setImgGenEnabled] = useState(!!initial?.imageGeneration);
   const [imgGenModel, setImgGenModel] = useState(
@@ -212,9 +204,6 @@ function ProviderForm({ initial, onSave, onCancel }: ProviderFormProps) {
         .split(",")
         .map((m) => m.trim())
         .filter(Boolean);
-      const embedding: EmbeddingConfig | undefined = embeddingModel.trim()
-        ? { model: embeddingModel.trim(), dimension: embeddingDimension }
-        : undefined;
       const imageGeneration: ImageGenerationConfig | undefined = imgGenEnabled
         ? {
             model: imgGenModel.trim(),
@@ -230,7 +219,6 @@ function ProviderForm({ initial, onSave, onCancel }: ProviderFormProps) {
         models: modelList,
         defaultModel: defaultModel || modelList[0] || "",
         maxContextTokens,
-        embedding,
         imageGeneration,
         modelConfig,
       });
@@ -433,40 +421,6 @@ function ProviderForm({ initial, onSave, onCancel }: ProviderFormProps) {
         </div>
       </div>
 
-      {/* Embedding 配置 */}
-      <div className="space-y-2">
-        <label className="text-xs font-medium text-muted-foreground">
-          Embedding 配置（用于 RAG 知识库，可选）
-        </label>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="text-xs text-muted-foreground">
-              Embedding 模型名称
-            </label>
-            <input
-              type="text"
-              value={embeddingModel}
-              onChange={(e) => setEmbeddingModel(e.target.value)}
-              placeholder="text-embedding-3-small"
-              className="w-full mt-1 px-2 py-1 border rounded text-sm bg-background outline-none"
-            />
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground">
-              Embedding 维度
-            </label>
-            <input
-              type="number"
-              value={embeddingDimension}
-              onChange={(e) => setEmbeddingDimension(Number(e.target.value))}
-              placeholder="1536"
-              min="1"
-              className="w-full mt-1 px-2 py-1 border rounded text-sm bg-background outline-none"
-            />
-          </div>
-        </div>
-      </div>
-
       {/* 图片生成配置 */}
       <div className="space-y-2">
         <div className="flex items-center gap-2">
@@ -648,14 +602,6 @@ function ProviderCard({
                       : "未设置"}
                   </span>
                 </div>
-                {provider.embedding && (
-                  <div>
-                    <span className="text-muted-foreground">Embedding：</span>
-                    <span>
-                      {provider.embedding.model} ({provider.embedding.dimension}维)
-                    </span>
-                  </div>
-                )}
                 {provider.imageGeneration && (
                   <div>
                     <span className="text-muted-foreground">图片生成：</span>

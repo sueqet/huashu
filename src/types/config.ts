@@ -1,8 +1,3 @@
-export interface EmbeddingConfig {
-  model: string;
-  dimension: number;
-}
-
 export interface ModelConfig {
   temperature: number;
   maxTokens: number;
@@ -27,7 +22,6 @@ export interface ApiProvider {
   models: string[];
   defaultModel: string;
   maxContextTokens: number;
-  embedding?: EmbeddingConfig;
   imageGeneration?: ImageGenerationConfig;
   modelConfig: ModelConfig;
 }

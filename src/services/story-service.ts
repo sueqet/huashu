@@ -1,22 +1,14 @@
 /**
  * 故事模式服务：选项解析、System Prompt 拼装、章节管理
  */
-import { readFile, writeFile, BaseDirectory } from "@tauri-apps/plugin-fs";
 import type {
   StoryConfig,
   StoryCharacter,
-  ChapterSummary,
   StoryTemplateFile,
   ChatNode,
 } from "@/types";
 import type { ContextMessage } from "./context-service";
 import { streamChatCompletion } from "./ai-service";
-import { getEmbedding } from "./embedding-service";
-import { searchKnowledge } from "./rag-service";
-import { VectorStore } from "./vector-store";
-import { fileService } from "./file-service";
-
-const BASE_DIR = BaseDirectory.AppData;
 
 /** 解析后的选项 */
 export interface ParsedChoice {
@@ -55,12 +47,9 @@ export function removeChoiceMarkers(content: string): string {
 /**
  * 构建故事模式 System Prompt
  *
- * 组装顺序：世界观 → 规则 → 角色 → 前情提要 → RAG → 选项指令
+ * 组装顺序：世界观 → 规则 → 角色 → 前情提要 → 选项指令
  */
-export function buildStorySystemPrompt(
-  storyConfig: StoryConfig,
-  ragContext?: string
-): string {
+export function buildStorySystemPrompt(storyConfig: StoryConfig): string {
   const sections: string[] = [];
 
   // 世界观设定
@@ -81,25 +70,13 @@ export function buildStorySystemPrompt(
     sections.push(`[角色列表]\n${charList}`);
   }
 
-  // 前情提要
+  // 前情提要：保留全部章节摘要（不再依赖向量检索召回早期章节）
   const summaries = storyConfig.chapterSummaries;
   if (summaries.length > 0) {
-    let displayedSummaries: ChapterSummary[];
-    if (summaries.length <= 5) {
-      displayedSummaries = summaries;
-    } else {
-      // 超过5章，只保留最后2章
-      displayedSummaries = summaries.slice(-2);
-    }
-    const summaryText = displayedSummaries
+    const summaryText = summaries
       .map((s) => `第${s.chapterNumber}章: ${s.summary}`)
       .join("\n");
     sections.push(`[前情提要]\n${summaryText}`);
-  }
-
-  // 相关历史片段（RAG）
-  if (ragContext && ragContext.trim()) {
-    sections.push(`[相关历史片段]\n${ragContext.trim()}`);
   }
 
   // 选项指令
@@ -108,121 +85,6 @@ export function buildStorySystemPrompt(
   );
 
   return sections.join("\n\n");
-}
-
-/* ========== 3. RAG 检索 ========== */
-
-/**
- * 搜索知识库获取相关历史上下文
- */
-export async function getStoryRagContext(
-  projectId: string,
-  query: string,
-  apiUrl: string,
-  apiKey: string,
-  embeddingModel: string
-): Promise<string> {
-  try {
-    const results = await searchKnowledge(
-      projectId,
-      query,
-      apiUrl,
-      apiKey,
-      embeddingModel,
-      5
-    );
-    if (results.length === 0) return "";
-
-    return results
-      .map((r) => r.chunk.content)
-      .join("\n---\n");
-  } catch {
-    return "";
-  }
-}
-
-/* ========== 4. 章节摘要索引 ========== */
-
-/**
- * 将早期章节摘要（除最后2章外）索引到 RAG 知识库
- *
- * 流程：
- * 1. 读取现有 chunks
- * 2. 删除旧的 story_summary_ chunks
- * 3. 为早期摘要生成新 chunks 和 embedding
- * 4. 更新向量存储
- */
-export async function indexChapterSummaries(
-  projectId: string,
-  summaries: ChapterSummary[],
-  apiUrl: string,
-  apiKey: string,
-  embeddingModel: string
-): Promise<void> {
-  if (summaries.length <= 2) return; // 没有需要索引的早期章节
-
-  // 早期章节 = 除最后2章外的所有
-  const earlySummaries = summaries.slice(0, -2);
-
-  const kbDir = `projects/${projectId}/knowledge_base`;
-  const chunksFilePath = `${kbDir}/chunks.json`;
-  const vectorsFilePath = `${kbDir}/vectors.bin`;
-
-  // 1. 读取现有 chunks
-  let allChunks: Array<{
-    id: string;
-    documentId: string;
-    content: string;
-    chunkIndex: number;
-    metadata?: Record<string, unknown>;
-  }> = [];
-  try {
-    allChunks = await fileService.readJSON(chunksFilePath);
-  } catch {
-    // 空知识库
-  }
-
-  // 2. 删除旧的 story_summary_ chunks
-  const STORY_SUMMARY_PREFIX = "story_summary_";
-  allChunks = allChunks.filter((c) => !c.id.startsWith(STORY_SUMMARY_PREFIX));
-
-  // 3. 添加新的摘要 chunks
-  const newChunks = earlySummaries.map((s) => ({
-    id: `story_summary_ch${s.chapterNumber}`,
-    documentId: "__story_summary__",
-    content: `第${s.chapterNumber}章摘要: ${s.summary}`,
-    chunkIndex: s.chapterNumber - 1,
-    metadata: { type: "story_summary", chapterNumber: s.chapterNumber },
-  }));
-  allChunks.push(...newChunks);
-
-  await fileService.writeJSON(chunksFilePath, allChunks);
-
-  // 4. 更新向量存储
-  let store: VectorStore;
-  try {
-    const bytes = await readFile(vectorsFilePath, { baseDir: BASE_DIR });
-    store = VectorStore.deserialize(bytes);
-  } catch {
-    store = new VectorStore();
-  }
-
-  // 删除旧的摘要向量
-  store.removeByPrefix(STORY_SUMMARY_PREFIX);
-
-  // 为新 chunks 生成 embedding
-  for (const chunk of newChunks) {
-    try {
-      const result = await getEmbedding(chunk.content, apiUrl, apiKey, embeddingModel);
-      store.add(chunk.id, result.embedding);
-    } catch {
-      // 单条 embedding 失败不中断整体流程
-      console.error(`Failed to embed chunk ${chunk.id}`);
-    }
-  }
-
-  const bytes = store.serialize();
-  await writeFile(vectorsFilePath, new Uint8Array(bytes), { baseDir: BASE_DIR });
 }
 
 /* ========== 5. 章节摘要生成 ========== */

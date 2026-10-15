@@ -80,7 +80,6 @@ export const projectService = {
       createdAt: now,
       updatedAt: now,
       isArchived: false,
-      ragEnabled: mode === "story", // 故事模式自动启用 RAG
       mode,
       storyConfig,
     };
@@ -89,8 +88,6 @@ export const projectService = {
     await fileService.ensureDir(projectDir(id));
     await fileService.ensureDir(`${projectDir(id)}/conversations`);
     await fileService.ensureDir(`${projectDir(id)}/attachments`);
-    await fileService.ensureDir(`${projectDir(id)}/knowledge_base`);
-    await fileService.ensureDir(`${projectDir(id)}/knowledge_base/documents`);
 
     // 写入项目元数据
     await fileService.writeJSON(metaPath(id), project);
@@ -103,7 +100,7 @@ export const projectService = {
    */
   async updateProject(
     projectId: string,
-    updates: Partial<Pick<Project, "name" | "description" | "conversationOrder" | "isArchived" | "ragEnabled" | "storyConfig">>
+    updates: Partial<Pick<Project, "name" | "description" | "conversationOrder" | "isArchived" | "storyConfig">>
   ): Promise<Project> {
     const project = await this.getProject(projectId);
     const updated: Project = {
@@ -116,7 +113,7 @@ export const projectService = {
   },
 
   /**
-   * 删除项目（包括所有对话和知识库）
+   * 删除项目（包括所有对话和附件）
    */
   async deleteProject(projectId: string): Promise<void> {
     await fileService.removeDir(projectDir(projectId));

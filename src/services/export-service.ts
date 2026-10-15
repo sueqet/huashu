@@ -1,12 +1,9 @@
 import JSZip from "jszip";
 import { v4 as uuidv4 } from "uuid";
-import { readFile, writeFile, BaseDirectory } from "@tauri-apps/plugin-fs";
 import { fileService } from "./file-service";
 import { projectService } from "./project-service";
 import type { Project } from "@/types";
 import type { Conversation } from "@/types";
-
-const BASE_DIR = BaseDirectory.AppData;
 
 function projectDir(projectId: string): string {
   return `projects/${projectId}`;
@@ -18,7 +15,7 @@ function projectDir(projectId: string): string {
 export const exportService = {
   /**
    * 导出项目为ZIP包
-   * 包含：meta.json、所有对话、知识库（元信息+文档+向量索引）
+   * 包含：meta.json、所有对话
    */
   async exportProject(projectId: string): Promise<Uint8Array> {
     const zip = new JSZip();
@@ -37,54 +34,6 @@ export const exportService = {
           `${convDir}/${entry.name}`
         );
         zip.file(`conversations/${entry.name}`, content);
-      }
-    }
-
-    // 3. 打包知识库
-    const kbPath = `${basePath}/knowledge_base`;
-    const kbExists = await fileService.exists(kbPath);
-    if (kbExists) {
-      // meta.json
-      const kbMetaExists = await fileService.exists(`${kbPath}/meta.json`);
-      if (kbMetaExists) {
-        const kbMeta = await fileService.readText(`${kbPath}/meta.json`);
-        zip.file("knowledge_base/meta.json", kbMeta);
-      }
-
-      // chunks.json
-      const chunksExists = await fileService.exists(`${kbPath}/chunks.json`);
-      if (chunksExists) {
-        const chunks = await fileService.readText(`${kbPath}/chunks.json`);
-        zip.file("knowledge_base/chunks.json", chunks);
-      }
-
-      // vectors.bin (二进制)
-      const vectorsExists = await fileService.exists(`${kbPath}/vectors.bin`);
-      if (vectorsExists) {
-        const vectorsData = await readFile(`${kbPath}/vectors.bin`, {
-          baseDir: BASE_DIR,
-        });
-        zip.file("knowledge_base/vectors.bin", vectorsData);
-      }
-
-      // documents/ 目录下的所有文件
-      const docsPath = `${kbPath}/documents`;
-      const docsExists = await fileService.exists(docsPath);
-      if (docsExists) {
-        const docEntries = await fileService.listDir(docsPath);
-        for (const doc of docEntries) {
-          if (doc.isFile && doc.name) {
-            try {
-              // 读取为二进制（可能是PDF等二进制文件）
-              const docData = await readFile(`${docsPath}/${doc.name}`, {
-                baseDir: BASE_DIR,
-              });
-              zip.file(`knowledge_base/documents/${doc.name}`, docData);
-            } catch {
-              console.warn(`无法读取知识库文档: ${doc.name}`);
-            }
-          }
-        }
       }
     }
 
@@ -116,8 +65,6 @@ export const exportService = {
     // 3. 创建项目目录结构
     await fileService.ensureDir(newBasePath);
     await fileService.ensureDir(`${newBasePath}/conversations`);
-    await fileService.ensureDir(`${newBasePath}/knowledge_base`);
-    await fileService.ensureDir(`${newBasePath}/knowledge_base/documents`);
 
     // 4. 更新并写入 meta.json
     const now = Date.now();
@@ -161,55 +108,6 @@ export const exportService = {
       await fileService.writeJSON(
         `${newBasePath}/conversations/${newConvId}.json`,
         updatedConv
-      );
-    }
-
-    // 6. 导入知识库文件
-    // meta.json
-    const kbMetaFile = zip.file("knowledge_base/meta.json");
-    if (kbMetaFile) {
-      const kbMeta = await kbMetaFile.async("string");
-      await fileService.writeText(
-        `${newBasePath}/knowledge_base/meta.json`,
-        kbMeta
-      );
-    }
-
-    // chunks.json
-    const chunksFile = zip.file("knowledge_base/chunks.json");
-    if (chunksFile) {
-      const chunks = await chunksFile.async("string");
-      await fileService.writeText(
-        `${newBasePath}/knowledge_base/chunks.json`,
-        chunks
-      );
-    }
-
-    // vectors.bin (二进制)
-    const vectorsFile = zip.file("knowledge_base/vectors.bin");
-    if (vectorsFile) {
-      const vectorsData = await vectorsFile.async("uint8array");
-      await writeFile(`${newBasePath}/knowledge_base/vectors.bin`, vectorsData, {
-        baseDir: BASE_DIR,
-      });
-    }
-
-    // documents/ 下的文件
-    const docFiles = Object.keys(zip.files).filter(
-      (name) =>
-        name.startsWith("knowledge_base/documents/") &&
-        !zip.files[name].dir
-    );
-    for (const docFileName of docFiles) {
-      const docFile = zip.file(docFileName);
-      if (!docFile) continue;
-
-      const fileName = docFileName.replace("knowledge_base/documents/", "");
-      const docData = await docFile.async("uint8array");
-      await writeFile(
-        `${newBasePath}/knowledge_base/documents/${fileName}`,
-        docData,
-        { baseDir: BASE_DIR }
       );
     }
 

@@ -1,17 +1,3 @@
-/** RAG 检索来源引用 */
-export interface RagSource {
-  /** 文档片段 ID */
-  chunkId: string;
-  /** 所属文档 ID */
-  documentId: string;
-  /** 文档名称 */
-  documentName: string;
-  /** 片段内容摘要 */
-  content: string;
-  /** 相似度分数 */
-  score: number;
-}
-
 /** 附件类型 */
 export type AttachmentType = "image" | "document";
 
@@ -64,8 +50,6 @@ export interface ChatNode {
   modelName?: string;
   /** 附件列表（图片、文档） */
   attachments?: Attachment[];
-  /** RAG 检索来源（引用的知识库片段） */
-  ragSources?: RagSource[];
   /** 创建时间 */
   createdAt: number;
   /** 最后更新时间 */

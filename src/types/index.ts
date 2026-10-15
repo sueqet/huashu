@@ -1,12 +1,10 @@
-export type { ChatNode, RagSource, Attachment, AttachmentType } from "./node";
+export type { ChatNode, Attachment, AttachmentType } from "./node";
 export type { Conversation } from "./conversation";
 export type { Project } from "./project";
-export type { KnowledgeBase, KBDocument, DocumentChunk } from "./knowledge-base";
 export type {
   AppConfig,
   ApiProvider,
   ModelConfig,
-  EmbeddingConfig,
   ImageGenerationConfig,
 } from "./config";
 export type {

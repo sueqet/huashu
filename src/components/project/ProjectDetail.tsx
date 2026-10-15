@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { useProjectStore } from "@/stores/project-store";
 import { useConversationStore } from "@/stores/conversation-store";
-import { KnowledgeBasePanel } from "./KnowledgeBasePanel";
 import { StorySetupPanel } from "./StorySetupPanel";
 import { Button } from "@/components/ui/button";
 import {
@@ -335,42 +334,6 @@ export function ProjectDetail({
               {project.description || "暂无描述，点击编辑按钮添加"}
             </p>
           )}
-        </div>
-      )}
-
-      {/* 知识库（RAG） - 故事模式自动启用，对话模式手动开关 */}
-      {project.mode !== "story" && project.ragEnabled && (
-        <div className="mb-4">
-          <div className="border rounded-lg">
-            <KnowledgeBasePanel projectId={projectId} />
-          </div>
-          <div className="mt-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="text-destructive border-destructive/30 hover:bg-destructive/10"
-              onClick={async () => {
-                if (await confirm({ title: "确定要关闭 RAG 知识库吗？", description: "已有的知识库数据不会被删除，再次启用后可继续使用。" })) {
-                  updateProject(projectId, { ragEnabled: false });
-                }
-              }}
-            >
-              关闭 RAG 知识库
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* RAG 开关 - 仅对话模式 */}
-      {project.mode !== "story" && !project.ragEnabled && (
-        <div className="mb-4">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => updateProject(projectId, { ragEnabled: true })}
-          >
-            启用 RAG 知识库
-          </Button>
         </div>
       )}
 

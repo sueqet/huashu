@@ -22,23 +22,10 @@ export { searchNodes } from "./search-service";
 export { exportService } from "./export-service";
 export { portableService } from "./portable-service";
 export { parseDocument, SUPPORTED_FILE_TYPES } from "./document-parser";
-export { splitText } from "./text-splitter";
-export { getEmbedding, getEmbeddings } from "./embedding-service";
-export { VectorStore } from "./vector-store";
-export {
-  getKnowledgeBase,
-  initKnowledgeBase,
-  addDocument,
-  removeDocument,
-  searchKnowledge,
-  checkEmbeddingCompatibility,
-} from "./rag-service";
 export {
   parseChoices,
   removeChoiceMarkers,
   buildStorySystemPrompt,
-  getStoryRagContext,
-  indexChapterSummaries,
   generateChapterSummary,
   generateChapterTransition,
   exportStoryTemplate,

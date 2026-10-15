@@ -18,8 +18,6 @@ export interface Project {
   updatedAt: number;
   /** 是否已归档 */
   isArchived: boolean;
-  /** 是否启用 RAG 检索 */
-  ragEnabled: boolean;
   /** 项目模式 */
   mode: "chat" | "story";
   /** 故事配置（仅 mode='story'） */

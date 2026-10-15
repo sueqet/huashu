@@ -13,7 +13,6 @@ import {
   resolveGeneratedImageDataUrl,
 } from "@/services";
 import { getGeneratedImageMetadata } from "@/services/image-generation-utils";
-import { searchKnowledge } from "@/services/rag-service";
 import { attachmentService } from "@/services/attachment-service";
 import { buildImagePromptFromContext } from "@/services/image-prompt-service";
 import { useAttachments } from "@/hooks/useAttachments";
@@ -24,7 +23,6 @@ import {
   getRecentMessagesText,
   generateChapterSummary,
   generateChapterTransition,
-  indexChapterSummaries,
 } from "@/services/story-service";
 import { countMessagesTokens } from "@/services/token-service";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
@@ -195,21 +193,6 @@ export function ChatView({
 
       const updatedSummaries = [...storyConfig.chapterSummaries, newSummary];
 
-      // 4. 如果章节 > 5，将早期摘要索引到 RAG
-      if (updatedSummaries.length > 5 && activeProvider.embedding) {
-        try {
-          await indexChapterSummaries(
-            latestConv.projectId,
-            updatedSummaries,
-            activeProvider.apiUrl,
-            activeProvider.apiKey,
-            activeProvider.embedding.model
-          );
-        } catch (err) {
-          console.warn("索引章节摘要到 RAG 失败:", err);
-        }
-      }
-
       // 5. 保存更新的 storyConfig
       await useProjectStore.getState().updateProject(project!.id, {
         storyConfig: {
@@ -302,36 +285,6 @@ export function ChatView({
         (p) => p.id === latestConv.projectId
       );
 
-      // RAG 检索
-      let ragContext: string | undefined;
-      if (freshProject?.ragEnabled && activeProvider.embedding) {
-        try {
-          // 再次获取最新状态（addNodeAndSave 后又更新了）
-          const freshConv = useConversationStore.getState().conversation!;
-          const targetNode = freshConv.nodes[targetNodeId];
-          if (targetNode?.content) {
-            const ragResults = await searchKnowledge(
-              freshConv.projectId,
-              targetNode.content,
-              activeProvider.apiUrl,
-              activeProvider.apiKey,
-              activeProvider.embedding.model,
-              5
-            );
-            if (ragResults.length > 0) {
-              ragContext = ragResults
-                .map(
-                  (r, i) =>
-                    `[参考${i + 1}] (相似度: ${(r.score * 100).toFixed(1)}%)\n${r.chunk.content}`
-                )
-                .join("\n\n");
-            }
-          }
-        } catch (err) {
-          console.warn("RAG 检索失败:", err);
-        }
-      }
-
       // 获取最新节点数据用于构建上下文
       const freshNodes = useConversationStore.getState().conversation!.nodes;
       // 获取最新的 storyConfig
@@ -343,11 +296,9 @@ export function ChatView({
         currentNodeId: targetNodeId,
         projectId: conversation.projectId,
         projectDescription: freshProject?.description,
-        ragContext,
         maxTokens: activeProvider.maxContextTokens,
         model: activeModel,
         storyConfig: freshIsStoryMode ? freshStoryConfig : undefined,
-        storyRagContext: undefined, // Will be populated by RAG for story mode later
       });
 
       let fullContent = "";
