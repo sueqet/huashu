@@ -170,7 +170,6 @@ export function ChatPanel({
       projectId: conversation.projectId,
       projectDescription: project?.description,
       maxTokens: activeProvider.maxContextTokens,
-      model: activeModel,
     });
 
     // 流式调用

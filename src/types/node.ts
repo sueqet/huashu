@@ -14,7 +14,7 @@ export interface Attachment {
   /** 提取文本路径，用于模型上下文；旧附件可为空 */
   textFilePath?: string;
   /** 预览类型；旧附件可为空 */
-  previewKind?: "image" | "text" | "pdf" | "docx";
+  previewKind?: "image" | "text";
   /** 原始文件大小（字节） */
   size: number;
   /** 内存缓存，不持久化到 JSON（base64 data URL 图片 / 文本 文档） */

@@ -21,7 +21,7 @@ export type { InlineImageData } from "./ai-service";
 export { searchNodes } from "./search-service";
 export { exportService } from "./export-service";
 export { portableService } from "./portable-service";
-export { parseDocument, SUPPORTED_FILE_TYPES } from "./document-parser";
+export { parseDocument, isSupportedDocument, TEXT_DOCUMENT_EXTENSIONS } from "./document-parser";
 export {
   parseChoices,
   removeChoiceMarkers,

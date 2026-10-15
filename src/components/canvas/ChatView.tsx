@@ -297,7 +297,6 @@ export function ChatView({
         projectId: conversation.projectId,
         projectDescription: freshProject?.description,
         maxTokens: activeProvider.maxContextTokens,
-        model: activeModel,
         storyConfig: freshIsStoryMode ? freshStoryConfig : undefined,
       });
 
@@ -379,8 +378,7 @@ export function ChatView({
               if (latestConv2) {
                 const chain = traceMessages(latestConv2.nodes, aiNode.id);
                 const totalTokens = countMessagesTokens(
-                  chain.map((n) => ({ role: n.role, content: n.content })),
-                  activeModel || "gpt-4"
+                  chain.map((n) => ({ role: n.role, content: n.content }))
                 );
                 const threshold = activeProvider.maxContextTokens * 0.5;
                 if (totalTokens > threshold) {

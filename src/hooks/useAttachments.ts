@@ -3,12 +3,11 @@ import { v4 as uuidv4 } from "uuid";
 import { open } from "@tauri-apps/plugin-dialog";
 import { readFile } from "@tauri-apps/plugin-fs";
 import type { Attachment, AttachmentType } from "@/types";
-import { parseDocument } from "@/services/document-parser";
+import { parseDocument, TEXT_DOCUMENT_EXTENSIONS } from "@/services/document-parser";
 import { attachmentService } from "@/services/attachment-service";
 import { getAttachmentPreviewKind } from "@/services/attachment-preview";
 
 const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
-const DOC_EXTENSIONS = ["txt", "md", "pdf", "docx", "html", "htm", "csv", "log"];
 
 const IMAGE_MIME_TYPES = new Set([
   "image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp",
@@ -40,14 +39,13 @@ function getMimeType(filename: string): string {
     gif: "image/gif",
     webp: "image/webp",
     bmp: "image/bmp",
-    pdf: "application/pdf",
-    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     txt: "text/plain",
     md: "text/markdown",
     html: "text/html",
     htm: "text/html",
     csv: "text/csv",
     log: "text/plain",
+    json: "application/json",
   };
   return map[ext] || "application/octet-stream";
 }
@@ -109,7 +107,7 @@ export function useAttachments(projectId: string, conversationId: string) {
         filePath: textFilePath,
         originalFilePath,
         textFilePath,
-        previewKind: getAttachmentPreviewKind("document", filename, mimeType),
+        previewKind: getAttachmentPreviewKind("document"),
         size: originalBytes.length,
         data: text,
       };
@@ -199,7 +197,7 @@ export function useAttachments(projectId: string, conversationId: string) {
   const pickDocuments = useCallback(async () => {
     const selected = await open({
       multiple: true,
-      filters: [{ name: "Documents", extensions: DOC_EXTENSIONS }],
+      filters: [{ name: "Documents", extensions: TEXT_DOCUMENT_EXTENSIONS }],
     });
     if (!selected) return;
 

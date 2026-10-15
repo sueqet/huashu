@@ -1,13 +1,14 @@
 import { useState, useCallback, useRef } from "react";
+import { isSupportedDocument } from "@/services/document-parser";
+
+const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp"]);
 
 const IMAGE_MIME_TYPES = new Set([
   "image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp",
 ]);
 
 const DOC_MIME_TYPES = new Set([
-  "text/plain", "text/markdown", "text/html", "text/csv",
-  "application/pdf",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "text/plain", "text/markdown", "text/html", "text/csv", "application/json",
 ]);
 
 /** 判断 MIME 类型是否受支持 */
@@ -86,9 +87,5 @@ export function useDragDrop({ onFiles }: UseDragDropOptions) {
 /** 通过文件扩展名判断是否支持 */
 function isSupportedByExtension(filename: string): boolean {
   const ext = filename.split(".").pop()?.toLowerCase() || "";
-  const supported = new Set([
-    "png", "jpg", "jpeg", "gif", "webp", "bmp",
-    "txt", "md", "pdf", "docx", "html", "htm", "csv", "log",
-  ]);
-  return supported.has(ext);
+  return IMAGE_EXTENSIONS.has(ext) || isSupportedDocument(filename);
 }

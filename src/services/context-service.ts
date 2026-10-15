@@ -99,7 +99,6 @@ interface BuildContextOptions {
   projectId?: string;
   projectDescription?: string;
   maxTokens: number;
-  model: string;
   recentRounds?: number;
   storyConfig?: import("@/types").StoryConfig;
 }
@@ -127,8 +126,8 @@ function traceMessageChain(
   return chain;
 }
 
-function countSingleMessageTokens(message: ContextMessage, model: string): number {
-  return countMessagesTokens([message], model) - 2;
+function countSingleMessageTokens(message: ContextMessage): number {
+  return countMessagesTokens([message]) - 2;
 }
 
 export async function buildContext(
@@ -140,7 +139,6 @@ export async function buildContext(
     projectId,
     projectDescription,
     maxTokens,
-    model,
     recentRounds = 3,
     storyConfig,
   } = options;
@@ -166,7 +164,7 @@ export async function buildContext(
   if (chain.length === 0) {
     return {
       messages,
-      totalTokens: countMessagesTokens(messages, model),
+      totalTokens: countMessagesTokens(messages),
       truncated: false,
     };
   }
@@ -174,17 +172,17 @@ export async function buildContext(
   const { fixed, candidates } = partitionChain(chain, recentRounds);
 
   const systemTokens =
-    messages.length > 0 ? countMessagesTokens(messages, model) : 0;
+    messages.length > 0 ? countMessagesTokens(messages) : 0;
   const fixedMessages = await Promise.all(
     fixed.map((node) => nodeToMessage(node, projectId))
   );
-  const fixedTokens = systemTokens + countMessagesTokens(fixedMessages, model);
+  const fixedTokens = systemTokens + countMessagesTokens(fixedMessages);
 
   const candidateMessages = await Promise.all(
     candidates.map((node) => nodeToMessage(node, projectId))
   );
   const keptIndexes = keepNewestWithinBudget(
-    candidateMessages.map((message) => countSingleMessageTokens(message, model)),
+    candidateMessages.map((message) => countSingleMessageTokens(message)),
     maxTokens - fixedTokens
   );
   truncated = keptIndexes.size < candidates.length;
@@ -201,7 +199,7 @@ export async function buildContext(
 
   return {
     messages,
-    totalTokens: countMessagesTokens(messages, model),
+    totalTokens: countMessagesTokens(messages),
     truncated,
   };
 }
