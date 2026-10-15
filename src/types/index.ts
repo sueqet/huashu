@@ -15,6 +15,4 @@ export type {
   ChapterSummary,
   TemplateMeta,
   StoryTemplateFile,
-  AgentConfig,
-  AgentTool,
 } from "./story";

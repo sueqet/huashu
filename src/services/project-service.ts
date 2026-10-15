@@ -65,7 +65,7 @@ export const projectService = {
   async createProject(
     name: string,
     description?: string,
-    mode: "chat" | "story" | "agent" = "chat",
+    mode: Project["mode"] = "chat",
     storyConfig?: StoryConfig
   ): Promise<Project> {
     const id = uuidv4();

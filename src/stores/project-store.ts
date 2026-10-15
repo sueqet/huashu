@@ -12,7 +12,7 @@ interface ProjectState {
   /** 从文件系统加载所有项目 */
   loadProjects: () => Promise<void>;
   /** 创建新项目 */
-  createProject: (name: string, description?: string, mode?: "chat" | "story" | "agent", storyConfig?: import("@/types").StoryConfig) => Promise<Project>;
+  createProject: (name: string, description?: string, mode?: Project["mode"], storyConfig?: import("@/types").StoryConfig) => Promise<Project>;
   /** 更新项目 */
   updateProject: (
     id: string,

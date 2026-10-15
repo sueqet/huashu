@@ -58,16 +58,3 @@ export interface StoryTemplateFile {
   characters: Omit<StoryCharacter, "isOriginal">[];
   openingMessage: string;
 }
-
-/** Agent 模式预留类型 */
-export interface AgentConfig {
-  tools: AgentTool[];
-  systemPrompt: string;
-  maxIterations: number;
-}
-
-export interface AgentTool {
-  name: string;
-  description: string;
-  parameters: Record<string, unknown>;
-}
