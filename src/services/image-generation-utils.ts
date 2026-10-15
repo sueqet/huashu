@@ -58,3 +58,35 @@ export function getGeneratedImageMetadata(
     size: getDataUrlPayloadSize(dataUrl),
   };
 }
+
+export interface ImageGenerationRequestConfig {
+  apiUrl: string;
+  apiKey: string;
+  model: string;
+  size: string;
+}
+
+export function getImageGenerationConfig(provider: {
+  apiUrl: string;
+  apiKey: string;
+  defaultModel?: string;
+  imageGeneration?: {
+    apiUrl?: string;
+    apiKey?: string;
+    model?: string;
+    size?: string;
+  };
+}): ImageGenerationRequestConfig | null {
+  // 生图默认关闭：只有在厂商设置里打开开关（保存了 imageGeneration）后才可用
+  if (!provider.imageGeneration) return null;
+
+  const model = provider.imageGeneration.model?.trim() || provider.defaultModel?.trim();
+  if (!model) return null;
+
+  return {
+    apiUrl: provider.imageGeneration.apiUrl?.trim() || provider.apiUrl,
+    apiKey: provider.imageGeneration.apiKey?.trim() || provider.apiKey,
+    model,
+    size: normalizeImageSize(provider.imageGeneration.size),
+  };
+}

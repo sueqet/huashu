@@ -1,38 +1,16 @@
-import { normalizeImageSize } from "./image-generation-utils";
+import {
+  getImageGenerationConfig,
+  normalizeImageSize,
+  type ImageGenerationRequestConfig,
+} from "./image-generation-utils";
+
+export { getImageGenerationConfig };
+export type { ImageGenerationRequestConfig };
 
 export interface ImageGenerationResult {
   b64_json?: string;
   url?: string;
   revised_prompt?: string;
-}
-
-export interface ImageGenerationRequestConfig {
-  apiUrl: string;
-  apiKey: string;
-  model: string;
-  size: string;
-}
-
-export function getImageGenerationConfig(provider: {
-  apiUrl: string;
-  apiKey: string;
-  defaultModel?: string;
-  imageGeneration?: {
-    apiUrl?: string;
-    apiKey?: string;
-    model?: string;
-    size?: string;
-  };
-}): ImageGenerationRequestConfig | null {
-  const model = provider.imageGeneration?.model?.trim() || provider.defaultModel?.trim();
-  if (!model) return null;
-
-  return {
-    apiUrl: provider.imageGeneration?.apiUrl?.trim() || provider.apiUrl,
-    apiKey: provider.imageGeneration?.apiKey?.trim() || provider.apiKey,
-    model,
-    size: normalizeImageSize(provider.imageGeneration?.size),
-  };
 }
 
 function supportsResponseFormat(model: string): boolean {

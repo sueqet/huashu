@@ -425,10 +425,13 @@ function ProviderForm({ initial, onSave, onCancel }: ProviderFormProps) {
       <div className="space-y-2">
         <div className="flex items-center gap-2">
           <label className="text-xs font-medium text-muted-foreground">
-            图片生成（DALL-E 兼容 API，可选）
+            图片生成（DALL-E 兼容 API，默认关闭）
           </label>
           <Switch checked={imgGenEnabled} onCheckedChange={setImgGenEnabled} />
         </div>
+        <p className="text-xs text-muted-foreground">
+          开启后对话中会出现"生图"按钮，生图请求会发送到下方配置的接口。
+        </p>
         {imgGenEnabled && (
           <div className="space-y-2 pl-2 border-l-2 border-muted">
             <div className="grid grid-cols-2 gap-3">
