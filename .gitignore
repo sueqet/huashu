@@ -45,3 +45,6 @@ create_shortcut.vbs
 # Local git worktrees
 worktrees/
 
+
+# Mobile preview screenshots (scripts/preview)
+preview-shots/
