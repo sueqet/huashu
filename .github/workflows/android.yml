@@ -22,7 +22,10 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      # 默认会安装已下架的 "tools" 包导致失败；运行器已自带 SDK，这里只需接受许可并确保 platform-tools
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - uses: pnpm/action-setup@v4
         with:
