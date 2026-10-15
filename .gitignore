@@ -37,7 +37,7 @@ PROJECT_INDEX.md
 tsconfig.tsbuildinfo
 
 # Tauri generated
-src-tauri/gen/
+src-tauri/gen/schemas/
 
 # VBS helper script
 create_shortcut.vbs

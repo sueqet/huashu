@@ -103,8 +103,8 @@ src-tauri/               # Tauri Rust 后端
 所有数据存储在系统 AppData 目录下：
 
 ```
-%APPDATA%/com.huashu.desktop/     (Windows)
-~/Library/Application Support/com.huashu.desktop/  (macOS)
+%APPDATA%/com.huashu.app/     (Windows)
+~/Library/Application Support/com.huashu.app/  (macOS)
 
 ├── config.json                    # 全局 API 配置
 └── projects/
