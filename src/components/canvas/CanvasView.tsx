@@ -38,6 +38,7 @@ import {
 import { ArrowLeft, Plus, Search, Loader2 } from "lucide-react";
 import { conversationService, streamChatCompletion } from "@/services";
 import { useConfirm } from "@/hooks/useConfirm";
+import { useIsNarrow } from "@/hooks/useIsNarrow";
 import { AttachmentViewerSheet } from "@/components/ui/attachment-viewer";
 
 const nodeTypes = {
@@ -86,6 +87,7 @@ function CanvasViewInner({
   onBack,
   onOpenConversation,
 }: CanvasViewProps) {
+  const isNarrow = useIsNarrow();
   const {
     conversation,
     loadConversation,
@@ -737,7 +739,7 @@ function CanvasViewInner({
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       {/* 顶部工具栏 */}
-      <div className="flex items-center gap-3 px-4 py-2 border-b bg-background">
+      <div className="flex flex-wrap items-center gap-2 px-2 sm:gap-3 sm:px-4 py-2 border-b bg-background">
         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onBack}>
           <ArrowLeft className="h-4 w-4" />
         </Button>
@@ -810,14 +812,14 @@ function CanvasViewInner({
           <Search className="h-4 w-4" />
         </Button>
 
-        <Button variant="outline" size="sm" onClick={handleCreateRoot}>
-          <Plus className="h-4 w-4 mr-1" />
-          新建根节点
+        <Button variant="outline" size="sm" onClick={handleCreateRoot} title="新建根节点" aria-label="新建根节点">
+          <Plus className="h-4 w-4 sm:mr-1" />
+          <span className="hidden sm:inline">新建根节点</span>
         </Button>
       </div>
 
       {/* 画布 */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="relative flex-1 flex overflow-hidden">
         <div className="flex-1">
           <ReactFlow
             nodes={nodes}
@@ -848,11 +850,13 @@ function CanvasViewInner({
             <Background gap={16} size={1} />
             <Controls position="bottom-left" showInteractive={false} />
             <FitToNode nodeId={selectedNodeId} />
-            <MiniMap
-              position="bottom-right"
-              nodeColor={miniMapNodeColor}
-              maskColor="rgba(0,0,0,0.1)"
-            />
+            {!isNarrow && (
+              <MiniMap
+                position="bottom-right"
+                nodeColor={miniMapNodeColor}
+                maskColor="rgba(0,0,0,0.1)"
+              />
+            )}
           </ReactFlow>
         </div>
 

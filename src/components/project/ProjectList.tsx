@@ -165,13 +165,13 @@ export function ProjectList({ onSelectProject, autoCreate, onAutoCreateDone }: P
   }
 
   return (
-    <div className="flex-1 flex flex-col p-6 overflow-hidden">
+    <div className="flex-1 flex flex-col p-4 sm:p-6 overflow-hidden">
       {/* 顶部操作栏 */}
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-semibold">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+        <h2 className="text-2xl font-semibold whitespace-nowrap">
           {showArchived ? "已归档项目" : "项目列表"}
         </h2>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
             size="sm"

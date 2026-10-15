@@ -555,7 +555,7 @@ function ProviderCard({
     >
       {/* Header */}
       <div
-        className="flex items-center gap-3 p-3 cursor-pointer hover:bg-accent/50"
+        className="flex flex-wrap items-center gap-x-3 gap-y-1 p-3 cursor-pointer hover:bg-accent/50"
         onClick={onToggleExpand}
       >
         {isExpanded ? (
@@ -563,13 +563,13 @@ function ProviderCard({
         ) : (
           <ChevronRight className="h-4 w-4 text-muted-foreground" />
         )}
-        <span className="font-medium text-sm flex-1">{provider.name}</span>
+        <span className="font-medium text-sm flex-1 min-w-[6em] truncate">{provider.name}</span>
         {isActive && (
           <span className="text-xs px-2 py-0.5 bg-primary/10 text-primary rounded">
             当前使用: {activeModel}
           </span>
         )}
-        <span className="text-xs text-muted-foreground">
+        <span className="text-xs text-muted-foreground whitespace-nowrap">
           {provider.models.length} 个模型
         </span>
       </div>

@@ -72,7 +72,7 @@ export function SearchPanel({
   };
 
   return (
-    <div className="w-[380px] border-l bg-background flex flex-col">
+    <div className="absolute inset-0 z-20 sm:static sm:w-[380px] border-l bg-background flex flex-col">
       {/* 头部 */}
       <div className="flex items-center gap-2 px-4 py-2 border-b">
         <Search className="h-4 w-4 text-muted-foreground shrink-0" />

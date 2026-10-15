@@ -93,8 +93,8 @@ export function EditToolbar({
         title="批量操作模式 (Ctrl+B)"
         className={isBatchMode ? "bg-purple-600 hover:bg-purple-700" : ""}
       >
-        <Layers className="h-4 w-4 mr-1" />
-        批量操作
+        <Layers className="h-4 w-4 sm:mr-1" />
+        <span className="hidden sm:inline">批量操作</span>
         {isBatchMode && batchCount > 0 && (
           <Badge
             variant="secondary"
