@@ -1,6 +1,8 @@
 // 浏览器里模拟 Tauri IPC（仅用于开发预览/截图，不会打包进应用）。
 // 提供内存文件系统（plugin-fs）、plugin-store 和 plugin-dialog 的最小实现。
-// 初始数据来自 window.__HUASHU_SEED__：{ "相对路径": "文件内容字符串" }。
+// 初始数据来自 window.__HUASHU_SEED__：{ "相对路径": "文件内容字符串" }，
+// 二进制文件来自 window.__HUASHU_SEED_BINARY__：{ "路径": "base64" }。
+// 文件选择对话框返回 window.__HUASHU_DIALOG_OPEN__，保存对话框返回 window.__HUASHU_DIALOG_SAVE__（未设置时视为取消）。
 (() => {
   const files = new Map(); // path -> Uint8Array
   const dirs = new Set([""]);
@@ -23,6 +25,9 @@
 
   for (const [path, content] of Object.entries(window.__HUASHU_SEED__ || {})) {
     writeBytes(path, encoder.encode(content));
+  }
+  for (const [path, base64] of Object.entries(window.__HUASHU_SEED_BINARY__ || {})) {
+    writeBytes(path, Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)));
   }
 
   const toBytes = (data) => {
@@ -95,8 +100,8 @@
     "plugin:store|has": ({ rid, key }) => !!stores.get(rid)?.has(key),
     "plugin:store|delete": ({ rid, key }) => !!stores.get(rid)?.delete(key),
     "plugin:store|save": () => undefined,
-    "plugin:dialog|open": () => null,
-    "plugin:dialog|save": () => null,
+    "plugin:dialog|open": () => window.__HUASHU_DIALOG_OPEN__ ?? null,
+    "plugin:dialog|save": () => window.__HUASHU_DIALOG_SAVE__ ?? null,
     "plugin:dialog|message": () => undefined,
     "plugin:dialog|ask": () => true,
     "plugin:dialog|confirm": () => true,
