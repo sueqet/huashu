@@ -60,13 +60,8 @@ export function ProjectList({ onSelectProject, autoCreate, onAutoCreateDone }: P
   const handleCreate = async () => {
     if (!newName.trim()) return;
     if (createMode === "story") {
-      const project = await createProject(newName.trim(), undefined, "story", {
-        worldSetting: "",
-        rules: "",
-        characters: [],
-        openingMessage: "",
-        chapterSummaries: [],
-      });
+      const { createDefaultStoryConfig } = await import("@/services/story-service");
+      const project = await createProject(newName.trim(), undefined, "story", createDefaultStoryConfig());
       setNewName("");
       setIsCreating(false);
       setCreateMode("chat");
@@ -111,7 +106,7 @@ export function ProjectList({ onSelectProject, autoCreate, onAutoCreateDone }: P
       const text = await file.text();
       const json = JSON.parse(text);
       const { importStoryTemplate } = await import("@/services/story-service");
-      const { storyConfig, errors } = importStoryTemplate(json);
+      const { storyConfig, errors } = await importStoryTemplate(json);
       if (errors.length > 0) {
         alert("导入剧本失败：" + errors.join("; "));
         return;

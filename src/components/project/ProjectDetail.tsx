@@ -51,6 +51,8 @@ export function ProjectDetail({
   const [renamingConvId, setRenamingConvId] = useState<string | null>(null);
   const [renameConvText, setRenameConvText] = useState("");
   const { confirm, ConfirmDialog } = useConfirm();
+  // 故事模式下，章节和故事设定分两个标签页，各自占满屏幕
+  const [storyTab, setStoryTab] = useState<"chapters" | "setup">("chapters");
 
   useEffect(() => {
     loadConversationList(projectId);
@@ -96,7 +98,7 @@ export function ProjectDetail({
     setExportMenuOpen(false);
     try {
       const { exportStoryTemplate } = await import("@/services/story-service");
-      const template = exportStoryTemplate(project.storyConfig!);
+      const template = await exportStoryTemplate(project.storyConfig!);
       const json = JSON.stringify(template, null, 2);
       const savePath = await save({
         defaultPath: `${project.storyConfig?.templateMeta?.name || project?.name || "story-template"}.huashu-story`,
@@ -138,9 +140,10 @@ export function ProjectDetail({
     if (project.mode === "story" && project.storyConfig) {
       // 先加载对话到 store，否则 addNodeAndSave 的 guard 会因 state.conversation 为 null 而跳过
       await useConversationStore.getState().loadConversation(projectId, conv.id);
-      const { conversationService } = await import("@/services");
-      const openingContent = project.storyConfig.openingMessage
-        || "故事开始了。请开始你的叙述……";
+      const { conversationService, getStoryOpening } = await import("@/services");
+      const { characterService } = await import("@/services/character-service");
+      const cards = await characterService.getMany(project.storyConfig.characterIds);
+      const openingContent = getStoryOpening(project.storyConfig, cards);
       const openingNode = conversationService.createNode(
         conv.id,
         "assistant",
@@ -162,9 +165,10 @@ export function ProjectDetail({
     if (project.storyConfig) {
       // 先加载对话到 store，否则 addNodeAndSave 的 guard 会因 state.conversation 为 null 而跳过
       await useConversationStore.getState().loadConversation(projectId, conv.id);
-      const { conversationService } = await import("@/services");
-      const openingContent = project.storyConfig.openingMessage
-        || "故事开始了。请开始你的叙述……";
+      const { conversationService, getStoryOpening } = await import("@/services");
+      const { characterService } = await import("@/services/character-service");
+      const cards = await characterService.getMany(project.storyConfig.characterIds);
+      const openingContent = getStoryOpening(project.storyConfig, cards);
       const openingNode = conversationService.createNode(
         conv.id,
         "assistant",
@@ -279,9 +283,28 @@ export function ProjectDetail({
         </div>
       </div>
 
-      {/* 故事模式：显示 StorySetupPanel */}
-      {project.mode === "story" && project.storyConfig && (
-        <div className="max-h-[40vh] overflow-y-auto shrink-0 mb-4">
+      {project.mode === "story" && (
+        <div className="flex gap-1 mb-4 rounded-lg bg-muted p-1 shrink-0">
+          {([
+            ["chapters", "章节"],
+            ["setup", "故事设定"],
+          ] as const).map(([value, label]) => (
+            <button
+              key={value}
+              onClick={() => setStoryTab(value)}
+              className={`flex-1 rounded-md py-1.5 text-sm ${
+                storyTab === value ? "bg-background font-medium shadow-sm" : "text-muted-foreground"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* 故事模式：故事设定 */}
+      {project.mode === "story" && project.storyConfig && storyTab === "setup" && (
+        <div className="flex-1 overflow-y-auto pb-8">
           <StorySetupPanel projectId={projectId} storyConfig={project.storyConfig} />
         </div>
       )}
@@ -338,6 +361,7 @@ export function ProjectDetail({
       )}
 
       {/* 对话列表 */}
+      {(project.mode !== "story" || storyTab === "chapters") && (
       <div className="flex-1 overflow-hidden flex flex-col">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-lg font-medium">
@@ -480,6 +504,7 @@ export function ProjectDetail({
           )}
         </div>
       </div>
+      )}
       {ConfirmDialog}
     </div>
   );

@@ -12,6 +12,7 @@ import {
   ImageIcon,
   Plus,
   Settings,
+  Users,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -162,6 +163,16 @@ export function Sidebar({ onNavigate: navigate, currentView, selectedProjectId }
           >
             <Plus className="h-4 w-4" />
             {!collapsed && <span>新建项目</span>}
+          </Button>
+
+          <Button
+            variant={currentView === "characters" || currentView === "character-edit" ? "secondary" : "ghost"}
+            className={`w-full ${collapsed ? "justify-center px-0" : "justify-start"}`}
+            onClick={() => onNavigate("characters")}
+            title="角色卡"
+          >
+            <Users className="h-4 w-4" />
+            {!collapsed && <span>角色卡</span>}
           </Button>
         </nav>
 

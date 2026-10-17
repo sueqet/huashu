@@ -1,14 +1,19 @@
 /**
  * 故事模式服务：选项解析、System Prompt 拼装、章节管理
  */
-import type {
-  StoryConfig,
-  StoryCharacter,
-  StoryTemplateFile,
-  ChatNode,
-} from "@/types";
+import type { CharacterCard, StoryConfig, StoryTemplateFile, ChatNode } from "@/types";
+import { buildStoryTemplate, parseStoryTemplate } from "@/lib/story-template";
+import { detectImageExtension } from "@/lib/image-type";
+import { dataUrlToBytes } from "./attachment-data";
+import { characterService } from "./character-service";
 import type { ContextMessage } from "./context-service";
 import { streamChatCompletion } from "./ai-service";
+
+export {
+  buildStorySystemPrompt,
+  buildPostHistoryInstruction,
+  getStoryOpening,
+} from "@/lib/story-prompt";
 
 /** 解析后的选项 */
 export interface ParsedChoice {
@@ -40,51 +45,6 @@ export function parseChoices(content: string): ParsedChoice[] {
  */
 export function removeChoiceMarkers(content: string): string {
   return content.replace(/\[选项\d+\]\s*.+/g, "").replace(/\n{3,}/g, "\n\n").trim();
-}
-
-/* ========== 2. System Prompt 拼装 ========== */
-
-/**
- * 构建故事模式 System Prompt
- *
- * 组装顺序：世界观 → 规则 → 角色 → 前情提要 → 选项指令
- */
-export function buildStorySystemPrompt(storyConfig: StoryConfig): string {
-  const sections: string[] = [];
-
-  // 世界观设定
-  if (storyConfig.worldSetting.trim()) {
-    sections.push(`[世界观设定]\n${storyConfig.worldSetting.trim()}`);
-  }
-
-  // 故事规则
-  if (storyConfig.rules.trim()) {
-    sections.push(`[故事规则]\n${storyConfig.rules.trim()}`);
-  }
-
-  // 角色列表
-  if (storyConfig.characters.length > 0) {
-    const charList = storyConfig.characters
-      .map((c) => `- ${c.name}: ${c.description}`)
-      .join("\n");
-    sections.push(`[角色列表]\n${charList}`);
-  }
-
-  // 前情提要：保留全部章节摘要（不再依赖向量检索召回早期章节）
-  const summaries = storyConfig.chapterSummaries;
-  if (summaries.length > 0) {
-    const summaryText = summaries
-      .map((s) => `第${s.chapterNumber}章: ${s.summary}`)
-      .join("\n");
-    sections.push(`[前情提要]\n${summaryText}`);
-  }
-
-  // 选项指令
-  sections.push(
-    `[指令]\n你是一位互动小说的叙事者。请根据玩家的选择推进故事，撰写引人入胜的情节。每次回复末尾，请提供2-4个选项供玩家选择，格式为：\n[选项1] 选项内容\n[选项2] 选项内容\n[选项3] 选项内容`
-  );
-
-  return sections.join("\n\n");
 }
 
 /* ========== 5. 章节摘要生成 ========== */
@@ -191,117 +151,46 @@ export async function generateChapterTransition(
 /* ========== 7. 模板导入导出 ========== */
 
 /**
- * 导出故事配置为模板文件格式
+ * 导出故事配置为模板文件（内嵌出场角色的完整角色卡和头像）
  */
-export function exportStoryTemplate(storyConfig: StoryConfig): StoryTemplateFile {
-  return {
-    format: "huashu-story-template",
-    version: "1.0",
-    templateMeta: storyConfig.templateMeta || {
-      name: "未命名模板",
-      author: "",
-      version: "1.0",
-      description: "",
-    },
-    worldSetting: storyConfig.worldSetting,
-    rules: storyConfig.rules,
-    characters: storyConfig.characters.map(({ name, description }) => ({
-      name,
-      description,
-    })),
-    openingMessage: storyConfig.openingMessage,
-  };
+export async function exportStoryTemplate(storyConfig: StoryConfig): Promise<StoryTemplateFile> {
+  const cards = await characterService.getMany(storyConfig.characterIds);
+  const characters = await Promise.all(
+    cards.map(async (card) => {
+      const { schemaVersion: _v, id: _id, avatar: _a, createdAt: _c, updatedAt: _u, ...content } = card;
+      const avatar = await characterService.readAvatarDataUrl(card);
+      return { content, ...(avatar ? { avatar } : {}) };
+    })
+  );
+  return buildStoryTemplate(storyConfig, characters);
 }
 
 /**
- * 导入模板文件，校验格式并返回 StoryConfig 和错误列表
+ * 导入模板文件：模板中的角色写入角色库，返回引用这些角色的故事配置
  */
-export function importStoryTemplate(
+export async function importStoryTemplate(
   data: unknown
-): { storyConfig: StoryConfig; errors: string[] } {
-  const errors: string[] = [];
-
-  // 基本类型校验
-  if (!data || typeof data !== "object") {
-    return {
-      storyConfig: createDefaultStoryConfig(),
-      errors: ["无效的模板数据：期望对象"],
-    };
+): Promise<{ storyConfig: StoryConfig; errors: string[] }> {
+  const parsed = parseStoryTemplate(data);
+  if (parsed.errors.length > 0) {
+    return { storyConfig: createDefaultStoryConfig(), errors: parsed.errors };
   }
 
-  const obj = data as Record<string, unknown>;
-
-  // 格式校验
-  if (obj.format !== "huashu-story-template") {
-    return {
-      storyConfig: createDefaultStoryConfig(),
-      errors: ["无效的模板格式：format 字段必须为 'huashu-story-template'"],
-    };
+  const cards: CharacterCard[] = [];
+  for (const { content, avatar } of parsed.characters) {
+    const bytes = avatar ? dataUrlToBytes(avatar) : null;
+    const ext = bytes ? detectImageExtension(bytes) : null;
+    cards.push(await characterService.create(content, bytes && ext ? { bytes, ext } : undefined));
   }
 
-  // 逐字段校验
-  if (typeof obj.worldSetting !== "string") {
-    errors.push("worldSetting 应为字符串");
-  }
-  if (typeof obj.rules !== "string") {
-    errors.push("rules 应为字符串");
-  }
-  if (typeof obj.openingMessage !== "string") {
-    errors.push("openingMessage 应为字符串");
-  }
-
-  // 角色校验
-  let characters: StoryCharacter[] = [];
-  if (Array.isArray(obj.characters)) {
-    characters = obj.characters
-      .map((c: unknown, i: number) => {
-        if (!c || typeof c !== "object") {
-          errors.push(`characters[${i}] 应为对象`);
-          return null;
-        }
-        const char = c as Record<string, unknown>;
-        if (typeof char.name !== "string") {
-          errors.push(`characters[${i}].name 应为字符串`);
-          return null;
-        }
-        if (typeof char.description !== "string") {
-          errors.push(`characters[${i}].description 应为字符串`);
-          return null;
-        }
-        return {
-          name: char.name as string,
-          description: char.description as string,
-          isOriginal: true,
-        };
-      })
-      .filter((c): c is StoryCharacter => c !== null);
-  } else {
-    errors.push("characters 应为数组");
-  }
-
-  // 模板元信息
-  let templateMeta: StoryConfig["templateMeta"];
-  if (obj.templateMeta && typeof obj.templateMeta === "object") {
-    const meta = obj.templateMeta as Record<string, unknown>;
-    templateMeta = {
-      name: typeof meta.name === "string" ? meta.name : "未命名模板",
-      author: typeof meta.author === "string" ? meta.author : "",
-      version: typeof meta.version === "string" ? meta.version : "1.0",
-      description: typeof meta.description === "string" ? meta.description : "",
-    };
-  }
-
-  const storyConfig: StoryConfig = {
-    worldSetting: typeof obj.worldSetting === "string" ? obj.worldSetting : "",
-    rules: typeof obj.rules === "string" ? obj.rules : "",
-    characters,
-    openingMessage:
-      typeof obj.openingMessage === "string" ? obj.openingMessage : "",
-    ...(templateMeta ? { templateMeta } : {}),
-    chapterSummaries: [],
+  return {
+    storyConfig: {
+      ...parsed.config,
+      characterIds: cards.map((card) => card.id),
+      chapterSummaries: [],
+    },
+    errors: [],
   };
-
-  return { storyConfig, errors };
 }
 
 /* ========== 8. 默认配置 ========== */
@@ -313,7 +202,8 @@ export function createDefaultStoryConfig(): StoryConfig {
   return {
     worldSetting: "",
     rules: "",
-    characters: [],
+    characterIds: [],
+    narrativeMode: "narrator",
     openingMessage: "",
     chapterSummaries: [],
   };

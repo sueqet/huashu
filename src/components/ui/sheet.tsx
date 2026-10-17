@@ -68,7 +68,7 @@ export function Sheet({
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
         <Dialog.Content
-          className={`fixed inset-y-0 right-0 z-50 ${resizable ? "" : SIZE_CLASS[size]} bg-background border-l shadow-xl data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right duration-200 flex flex-col`}
+          className={`fixed inset-y-0 right-0 z-50 max-w-full ${resizable ? "" : SIZE_CLASS[size]} bg-background border-l shadow-xl data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right duration-200 flex flex-col`}
           style={widthStyle}
         >
           {resizable && (

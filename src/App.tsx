@@ -13,6 +13,7 @@ function App() {
   const [openConvId, setOpenConvId] = useState<string | null>(null);
   const [initialized, setInitialized] = useState(false);
   const [autoCreate, setAutoCreate] = useState(false);
+  const [editingCharacterId, setEditingCharacterId] = useState<string | null>(null);
   const loadProjects = useProjectStore((s) => s.loadProjects);
   const loadConfig = useConfigStore((s) => s.loadConfig);
 
@@ -111,6 +112,15 @@ function App() {
         onSelectProject={handleSelectProject}
         onBackToProjects={handleBackToProjects}
         onOpenConversation={handleOpenConversation}
+        editingCharacterId={editingCharacterId}
+        onEditCharacter={(id) => {
+          setEditingCharacterId(id);
+          setCurrentView("character-edit");
+        }}
+        onBackToCharacters={() => {
+          setEditingCharacterId(null);
+          setCurrentView("characters");
+        }}
       />
     </div>
   );

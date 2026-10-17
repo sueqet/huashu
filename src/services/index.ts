@@ -3,6 +3,7 @@ export { projectService } from "./project-service";
 export { conversationService } from "./conversation-service";
 export { configService } from "./config-service";
 export { attachmentService } from "./attachment-service";
+export { characterService } from "./character-service";
 export { migrateAttachments } from "./attachment-migration";
 export {
   generateImage,
@@ -26,6 +27,8 @@ export {
   parseChoices,
   removeChoiceMarkers,
   buildStorySystemPrompt,
+  buildPostHistoryInstruction,
+  getStoryOpening,
   generateChapterSummary,
   generateChapterTransition,
   exportStoryTemplate,

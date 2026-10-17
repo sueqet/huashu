@@ -1,4 +1,5 @@
-import type { ChatNode } from "@/types";
+import type { CharacterCard, ChatNode, StoryConfig } from "@/types";
+import { buildPostHistoryInstruction, buildStorySystemPrompt } from "@/lib/story-prompt";
 import { attachmentService } from "./attachment-service";
 import { countMessagesTokens } from "./token-service";
 import { inChainOrder, keepNewestWithinBudget, partitionChain } from "./context-window";
@@ -100,7 +101,9 @@ interface BuildContextOptions {
   projectDescription?: string;
   maxTokens: number;
   recentRounds?: number;
-  storyConfig?: import("@/types").StoryConfig;
+  storyConfig?: StoryConfig;
+  /** 故事的出场角色卡（按 storyConfig.characterIds 顺序） */
+  storyCharacters?: CharacterCard[];
 }
 
 interface ContextResult {
@@ -141,16 +144,22 @@ export async function buildContext(
     maxTokens,
     recentRounds = 3,
     storyConfig,
+    storyCharacters = [],
   } = options;
 
   const messages: ContextMessage[] = [];
+  /** 放在对话历史之后的消息（角色卡的 post_history_instructions） */
+  const tailMessages: ContextMessage[] = [];
   let truncated = false;
 
   if (storyConfig) {
-    const { buildStorySystemPrompt } = await import("./story-service");
-    const storyPrompt = buildStorySystemPrompt(storyConfig);
+    const storyPrompt = buildStorySystemPrompt(storyConfig, storyCharacters);
     if (storyPrompt) {
       messages.push({ role: "system", content: storyPrompt });
+    }
+    const postHistory = buildPostHistoryInstruction(storyConfig, storyCharacters);
+    if (postHistory) {
+      tailMessages.push({ role: "system", content: postHistory });
     }
   } else {
     const systemParts: string[] = [];
@@ -162,6 +171,7 @@ export async function buildContext(
 
   const chain = traceMessageChain(nodes, currentNodeId);
   if (chain.length === 0) {
+    messages.push(...tailMessages);
     return {
       messages,
       totalTokens: countMessagesTokens(messages),
@@ -171,8 +181,9 @@ export async function buildContext(
 
   const { fixed, candidates } = partitionChain(chain, recentRounds);
 
+  const systemMessages = [...messages, ...tailMessages];
   const systemTokens =
-    messages.length > 0 ? countMessagesTokens(messages) : 0;
+    systemMessages.length > 0 ? countMessagesTokens(systemMessages) : 0;
   const fixedMessages = await Promise.all(
     fixed.map((node) => nodeToMessage(node, projectId))
   );
@@ -196,6 +207,7 @@ export async function buildContext(
   for (const node of inChainOrder(chain, new Set(messageById.keys()))) {
     messages.push(messageById.get(node.id)!);
   }
+  messages.push(...tailMessages);
 
   return {
     messages,

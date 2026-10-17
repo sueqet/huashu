@@ -9,8 +9,11 @@ export type {
 } from "./config";
 export type {
   StoryConfig,
-  StoryCharacter,
+  LegacyStoryCharacter,
+  NarrativeMode,
   ChapterSummary,
   TemplateMeta,
+  TemplateCharacter,
   StoryTemplateFile,
 } from "./story";
+export type { CharacterCard, Persona } from "./character";

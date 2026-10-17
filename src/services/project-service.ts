@@ -1,5 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import type { Project, StoryConfig } from "@/types";
+import { emptyCharacterContent } from "@/lib/character-card";
+import { characterService } from "./character-service";
 import { fileService } from "./file-service";
 
 const CURRENT_SCHEMA_VERSION = 1;
@@ -21,6 +23,38 @@ function migrateProject(project: Project): Project {
 }
 
 /**
+ * 旧版故事把角色（名字 + 描述）内联在 storyConfig.characters 中，
+ * 迁移为角色库中的角色卡并改为引用。返回是否有改动。
+ */
+async function migrateLegacyCharacters(project: Project): Promise<boolean> {
+  const config = project.storyConfig;
+  if (!config) return false;
+  if (Array.isArray(config.characterIds) && !config.characters) return false;
+
+  const ids = Array.isArray(config.characterIds) ? [...config.characterIds] : [];
+  for (const legacy of config.characters ?? []) {
+    if (!legacy?.name?.trim()) continue;
+    const card = await characterService.create({
+      ...emptyCharacterContent(legacy.name.trim()),
+      description: legacy.description || "",
+    });
+    ids.push(card.id);
+  }
+
+  const { characters: _legacy, ...rest } = config;
+  project.storyConfig = { ...rest, characterIds: ids };
+  return true;
+}
+
+async function loadProject(projectId: string): Promise<Project> {
+  const project = migrateProject(await fileService.readJSON<Project>(metaPath(projectId)));
+  if (await migrateLegacyCharacters(project)) {
+    await fileService.writeJSON(metaPath(projectId), project);
+  }
+  return project;
+}
+
+/**
  * 项目服务：管理项目的完整生命周期
  */
 export const projectService = {
@@ -34,11 +68,7 @@ export const projectService = {
     for (const entry of entries) {
       if (entry.isDirectory && entry.name) {
         try {
-          let project = await fileService.readJSON<Project>(
-            metaPath(entry.name)
-          );
-          project = migrateProject(project);
-          projects.push(project);
+          projects.push(await loadProject(entry.name));
         } catch {
           // 跳过无法读取的项目目录
           console.warn(`无法读取项目: ${entry.name}`);
@@ -55,8 +85,7 @@ export const projectService = {
    * 获取单个项目
    */
   async getProject(projectId: string): Promise<Project> {
-    const project = await fileService.readJSON<Project>(metaPath(projectId));
-    return migrateProject(project);
+    return loadProject(projectId);
   },
 
   /**

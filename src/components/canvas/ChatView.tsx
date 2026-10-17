@@ -14,6 +14,7 @@ import {
 } from "@/services";
 import { getGeneratedImageMetadata } from "@/services/image-generation-utils";
 import { attachmentService } from "@/services/attachment-service";
+import { characterService } from "@/services/character-service";
 import { buildImagePromptFromContext } from "@/services/image-prompt-service";
 import { useAttachments } from "@/hooks/useAttachments";
 import { useDragDrop } from "@/hooks/useDragDrop";
@@ -290,6 +291,10 @@ export function ChatView({
       // 获取最新的 storyConfig
       const freshIsStoryMode = freshProject?.mode === "story";
       const freshStoryConfig = freshProject?.storyConfig;
+      const storyCharacters =
+        freshIsStoryMode && freshStoryConfig
+          ? await characterService.getMany(freshStoryConfig.characterIds)
+          : [];
 
       const context = await buildContext({
         nodes: freshNodes,
@@ -298,6 +303,7 @@ export function ChatView({
         projectDescription: freshProject?.description,
         maxTokens: activeProvider.maxContextTokens,
         storyConfig: freshIsStoryMode ? freshStoryConfig : undefined,
+        storyCharacters,
       });
 
       let fullContent = "";
